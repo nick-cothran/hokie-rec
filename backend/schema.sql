@@ -35,8 +35,8 @@ CREATE TABLE Users (
 
 CREATE TABLE Team (
     team_id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    league_id           INT NOT NULL REFERENCES League(league_id),
-    captain_id          INT NOT NULL REFERENCES Users(user_id),
+    league_id           INT NOT NULL REFERENCES League(league_id) ON DELETE RESTRICT,
+    captain_id          INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
     team_name           VARCHAR(60) NOT NULL,
     status              VARCHAR(15) NOT NULL,
     registered_at       TIMESTAMPTZ NOT NULL,
@@ -45,8 +45,8 @@ CREATE TABLE Team (
 
 CREATE TABLE RosterMembership (
     membership_id       INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    team_id             INT NOT NULL REFERENCES Team(team_id),
-    user_id             INT NOT NULL REFERENCES Users(user_id),
+    team_id             INT NOT NULL REFERENCES Team(team_id) ON DELETE CASCADE,
+    user_id             INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
     status              VARCHAR(15) NOT NULL,
     invited_at          TIMESTAMPTZ NOT NULL,
     joined_at           TIMESTAMPTZ,
@@ -62,11 +62,11 @@ CREATE TABLE Facility (
 
 CREATE TABLE Game (
     game_id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    league_id           INT NOT NULL REFERENCES League(league_id),
-    facility_id         INT NOT NULL REFERENCES Facility(facility_id),
-    home_team_id        INT REFERENCES Team(team_id),
-    away_team_id        INT REFERENCES Team(team_id),
-    next_game_id        INT REFERENCES Game(game_id),
+    league_id           INT NOT NULL REFERENCES League(league_id) ON DELETE RESTRICT,
+    facility_id         INT NOT NULL REFERENCES Facility(facility_id) ON DELETE RESTRICT,
+    home_team_id        INT REFERENCES Team(team_id) ON DELETE RESTRICT,
+    away_team_id        INT REFERENCES Team(team_id) ON DELETE RESTRICT,
+    next_game_id        INT REFERENCES Game(game_id) ON DELETE SET NULL,
     start_time          TIMESTAMPTZ NOT NULL,
     end_time            TIMESTAMPTZ NOT NULL,
     game_type           VARCHAR(10) NOT NULL,
@@ -79,9 +79,9 @@ CREATE TABLE Game (
 
 CREATE TABLE ScoreReport (
     report_id           INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    game_id             INT NOT NULL REFERENCES Game(game_id),
-    submitted_by        INT NOT NULL REFERENCES Users(user_id),
-    forfeit_team_id     INT REFERENCES Team(team_id),
+    game_id             INT NOT NULL REFERENCES Game(game_id) ON DELETE CASCADE,
+    submitted_by        INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
+    forfeit_team_id     INT REFERENCES Team(team_id) ON DELETE RESTRICT,
     home_score          INT,
     away_score          INT,
     is_forfeit          BOOLEAN NOT NULL,
@@ -91,9 +91,9 @@ CREATE TABLE ScoreReport (
 
 CREATE TABLE OfficiatingAssignment (
     assignment_id       INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    game_id             INT NOT NULL REFERENCES Game(game_id),
-    official_id         INT NOT NULL REFERENCES Users(user_id),
-    assigned_by         INT NOT NULL REFERENCES Users(user_id),
+    game_id             INT NOT NULL REFERENCES Game(game_id) ON DELETE CASCADE,
+    official_id         INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
+    assigned_by         INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
     position            VARCHAR(20) NOT NULL,
     status              VARCHAR(15) NOT NULL,
     assigned_at         TIMESTAMPTZ NOT NULL,
@@ -102,10 +102,10 @@ CREATE TABLE OfficiatingAssignment (
 
 CREATE TABLE IncidentReport (
     incident_id         INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    game_id             INT NOT NULL REFERENCES Game(game_id),
-    filed_by            INT NOT NULL REFERENCES Users(user_id),
-    involved_user_id    INT REFERENCES Users(user_id),
-    reviewed_by         INT REFERENCES Users(user_id),
+    game_id             INT NOT NULL REFERENCES Game(game_id) ON DELETE RESTRICT,
+    filed_by            INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
+    involved_user_id    INT REFERENCES Users(user_id) ON DELETE RESTRICT,
+    reviewed_by         INT REFERENCES Users(user_id) ON DELETE RESTRICT,
     incident_type       VARCHAR(20) NOT NULL,
     description         TEXT NOT NULL,
     status              VARCHAR(15) NOT NULL,

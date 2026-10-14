@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "seed": "docker compose exec -T db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /seed.sql"
+  }
+}
