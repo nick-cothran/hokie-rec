@@ -29,7 +29,7 @@ class ApiTest(unittest.TestCase):
         self.name = f"Test {uuid.uuid4().hex[:8]}"
 
     def tearDown(self):
-        sql("DELETE FROM Team WHERE team_name LIKE 'Test %%'")  # roster rows cascade
+        sql("DELETE FROM Team WHERE team_name LIKE %s", (self.name + "%",))  # roster rows cascade
 
     def register(self, name=None, user_id=None):
         return client.post("/api/teams", json={
@@ -73,6 +73,17 @@ class ApiTest(unittest.TestCase):
     def test_s2_rejects_non_player(self):
         official = sql("SELECT user_id FROM Users WHERE role = 'official' LIMIT 1")[0][0]
         self.assertEqual(self.register(user_id=official).status_code, 403)
+
+    def test_s2_rejects_suspended_player(self):
+        suspended = sql("SELECT user_id FROM Users WHERE role = 'player' AND suspended_until >= CURRENT_DATE LIMIT 1")
+        if not suspended:
+            self.skipTest("no currently suspended player in seed data")
+        self.assertEqual(self.register(user_id=suspended[0][0]).status_code, 403)
+
+    def test_bad_text_is_readable_422_not_500(self):
+        r = client.get("/api/leagues", params={"sport": "a\x00"})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("detail", r.json())
 
     def test_s2_rejects_blank_and_too_long_names(self):
         self.assertEqual(self.register(name="   ").status_code, 422)

@@ -53,6 +53,12 @@ def integrity_error(request, e):
     return JSONResponse(status_code=409, content={"detail": message})
 
 
+@app.exception_handler(psycopg.DataError)
+def data_error(request, e):
+    # Bad values pydantic can't catch (NUL bytes, out-of-range ids); some are raised client-side with no diag
+    return JSONResponse(status_code=422, content={"detail": e.diag.message_primary or str(e)})
+
+
 TeamName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
 
 
