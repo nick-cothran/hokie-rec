@@ -10,3 +10,9 @@
 
 1. With the docker engine running, run `docker compose up -d` from the root directory.
 2. To seed data, run `npm run seed`.
+
+## Running the frontend
+
+1. `cd frontend`
+2. `npm run install`
+3. `npm run dev`
