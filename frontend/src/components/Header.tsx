@@ -1,24 +1,25 @@
+import '../styles/Header.css'
+import { Link, NavLink } from 'react-router-dom'
+
 function Header() {
   return (
     <header className="site-header">
-      <div className="brand-block">
+      <Link className="brand-block" to="/" aria-label="Hokie Rec home">
         <div className="brand-mark">HR</div>
         <div>
           <p className="brand-name">Hokie Rec</p>
           <span className="brand-tag">Campus Leagues & Activities</span>
         </div>
-      </div>
+      </Link>
 
       <nav className="main-nav" aria-label="Main navigation">
-        <a href="#">Leagues</a>
-        <a href="#">Teams</a>
-        <a href="#">Schedule</a>
-        <a href="#">Resources</a>
+        <NavLink to="/leagues">Leagues</NavLink>
+        <NavLink to="/teams">Teams</NavLink>
+        <NavLink to="/schedule">Schedule</NavLink>
+        <NavLink to="/resources">Resources</NavLink>
       </nav>
 
-      <button type="button" className="login-button">
-        Sign in
-      </button>
+      <Link className="login-button" to="/sign-in">Sign in</Link>
     </header>
   )
 }

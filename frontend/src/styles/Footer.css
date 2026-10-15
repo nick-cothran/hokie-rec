@@ -1,0 +1,9 @@
+.site-footer { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 2rem; padding: 2.5rem max(2rem, calc((100vw - 1280px) / 2)); background: #172b4d; color: white; }
+.footer-brand-link { color: white; font-size: 1.2rem; font-weight: 750; text-decoration: none; }
+.footer-brand p { margin: 0.6rem 0 0; color: #d1d9e4; }
+.footer-column h3 { margin: 0 0 0.75rem; color: white; font-size: 0.95rem; }
+.footer-column ul { display: grid; gap: 0.55rem; margin: 0; padding: 0; list-style: none; }
+.footer-column a { color: #d1d9e4; font-size: 0.88rem; text-decoration: none; }
+.footer-column a:hover { color: #ffad69; }
+
+@media (max-width: 768px) { .site-footer { grid-template-columns: 1fr; padding: 2rem 1.25rem; } }

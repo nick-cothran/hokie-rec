@@ -1,0 +1,17 @@
+.site-header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 0.9rem max(2rem, calc((100vw - 1280px) / 2)); border-bottom: 1px solid var(--line); background: var(--paper); }
+.brand-block { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; }
+.brand-mark { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; border-radius: 4px; background: var(--orange); color: white; font-weight: 800; }
+.brand-name { margin: 0; color: var(--ink); font-size: 1.2rem; font-weight: 750; }
+.brand-tag { color: #677489; font-size: 0.75rem; }
+.main-nav { display: flex; align-items: center; gap: 1.5rem; }
+.main-nav a { padding: 0.7rem 0.1rem; border-bottom: 2px solid transparent; color: var(--ink-soft); font-size: 0.9rem; font-weight: 650; text-decoration: none; transition: color 0.18s ease; }
+.main-nav a:hover, .main-nav a.active { color: var(--ink); }
+.main-nav a.active { border-color: var(--orange); }
+.login-button { padding: 0.75rem 1.25rem; border-radius: 4px; background: var(--orange); color: white; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.login-button:hover { background: var(--orange-dark); }
+
+@media (max-width: 768px) {
+  .site-header { display: grid; grid-template-columns: 1fr auto; gap: 0.8rem 1rem; padding: 0.8rem 1rem; }
+  .main-nav { grid-column: 1 / -1; grid-row: 2; gap: 0.75rem 1rem; overflow-x: auto; width: 100%; padding-bottom: 0.15rem; }
+  .main-nav a { white-space: nowrap; }
+}

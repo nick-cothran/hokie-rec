@@ -1,24 +1,36 @@
-import './App.css'
+import './styles/App.css'
 import Header from './components/Header'
 import Footer from './components/Footer'
+import Home from './components/Home'
+import Leagues from './components/Leagues'
+import LeagueDetail from './components/LeagueDetail'
+import Teams from './components/Teams'
+import TeamDetail from './components/TeamDetail'
+import Schedule from './components/Schedule'
+import Resources from './components/Resources'
+import SignIn from './components/SignIn'
+import NotFound from './components/NotFound'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
 function App() {
   return (
-    <div className="app-shell">
-      <Header />
-
-      <main className="page-content">
-        <section className="hero-panel">
-          <p className="eyebrow">Welcome</p>
-          <h1>Play, compete, and connect.</h1>
-          <p className="subtext">
-            Discover upcoming leagues, manage teams, and stay on top of game day.
-          </p>
-        </section>
-      </main>
-
-      <Footer />
-    </div>
+    <BrowserRouter>
+      <div className="app-shell">
+        <Header />
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/leagues" element={<Leagues />} />
+          <Route path="/leagues/:leagueId" element={<LeagueDetail />} />
+          <Route path="/teams" element={<Teams />} />
+          <Route path="/teams/:teamId" element={<TeamDetail />} />
+          <Route path="/schedule" element={<Schedule />} />
+          <Route path="/resources" element={<Resources />} />
+          <Route path="/sign-in" element={<SignIn />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+        <Footer />
+      </div>
+    </BrowserRouter>
   )
 }
 
