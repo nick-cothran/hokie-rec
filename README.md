@@ -16,16 +16,18 @@
 
 ## API (base URL `http://localhost:8000`)
 
-There is no login yet: the UI picks an "acting as" user from `GET /api/users` and sends that `user_id`.
+There is no login yet: the UI's "Choose user" page (`/sign-in`) picks an "acting as" user from `GET /api/users` and sends that `user_id`.
 
 | Method | Path | Body / query | Notes |
 |---|---|---|---|
 | GET | `/api/health` | | `{status, version, database, leagues, teams}` for the connection card |
 | GET | `/api/users` | | `user_id, first_name, last_name, role` for the "acting as" picker |
 | GET | `/api/leagues` | `?sport=Soccer&term=Fall 2026` (both optional) | S1. Leagues with `team_count` |
+| GET | `/api/teams` | `?league_id=1` (optional) | Team directory with league, captain and `member_count` |
 | POST | `/api/teams` | `{league_id, team_name, user_id}` | S2. `user_id` becomes captain. 201 → `{team_id}` |
 | GET | `/api/teams/{team_id}` | | Team, league and `roster` |
 | PATCH | `/api/teams/{team_id}` | `{team_name, user_id}` | S3. Captain only. 200 → `{team_id, team_name}` |
+| DELETE | `/api/teams/{team_id}` | `?user_id=` | Captain only. Roster rows cascade; 409 if the team has games (RESTRICT). 204 |
 | DELETE | `/api/teams/{team_id}/invites/{player_id}` | `?user_id=` | S4. Captain only, pending invites only. 204 |
 
 Errors always come back as `{"detail": "readable message"}`: 409 for a broken DB rule (e.g. duplicate team name in a league), 403 not allowed, 404 not found, 422 bad input.
@@ -33,5 +35,5 @@ Errors always come back as `{"detail": "readable message"}`: 409 for a broken DB
 ## Running the frontend
 
 1. `cd frontend`
-2. `npm run install`
-3. `npm run dev`
+2. `npm install`
+3. `npm run dev`, then open http://localhost:5173 (the backend only allows this origin)

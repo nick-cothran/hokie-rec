@@ -44,6 +44,10 @@ app.add_middleware(
 FRIENDLY_ERRORS = {
     "team_league_id_team_name_key": "A team with that name already exists in this league.",
     "team_league_id_fkey": "That league does not exist.",
+    # Game and ScoreReport reference Team with ON DELETE RESTRICT
+    "game_home_team_id_fkey": "This team has games on the schedule or in the results, so it can't be deleted.",
+    "game_away_team_id_fkey": "This team has games on the schedule or in the results, so it can't be deleted.",
+    "scorereport_forfeit_team_id_fkey": "This team has score reports on record, so it can't be deleted.",
 }
 
 
@@ -124,9 +128,10 @@ def register_team(body: NewTeam):
         """, (body.user_id,)).fetchone()
         if not eligible:
             raise HTTPException(403, "Only active, non-suspended players can register a team.")
+        # status and registered_at come from their column DEFAULTs ('active', NOW())
         team = conn.execute("""
-            INSERT INTO Team (league_id, captain_id, team_name, status, registered_at)
-            VALUES (%s, %s, %s, 'active', NOW())
+            INSERT INTO Team (league_id, captain_id, team_name)
+            VALUES (%s, %s, %s)
             RETURNING team_id
         """, (body.league_id, body.user_id, body.team_name)).fetchone()
         conn.execute("""
@@ -134,6 +139,24 @@ def register_team(body: NewTeam):
             VALUES (%s, %s, 'active', NOW(), NOW())
         """, (team["team_id"], body.user_id))
     return team
+
+
+# Team directory: lets the UI reach a team without typing its id
+@app.get("/api/teams")
+def list_teams(league_id: int | None = None):
+    with db() as conn:
+        return conn.execute("""
+            SELECT t.team_id, t.team_name, t.status, l.league_id, l.league_name, l.sport_name, l.term,
+                   u.first_name AS captain_first_name, u.last_name AS captain_last_name,
+                   COUNT(r.membership_id) FILTER (WHERE r.status = 'active') AS member_count
+            FROM Team t
+            JOIN League l ON l.league_id = t.league_id
+            JOIN Users u ON u.user_id = t.captain_id
+            LEFT JOIN RosterMembership r ON r.team_id = t.team_id
+            WHERE (%(league_id)s::int IS NULL OR t.league_id = %(league_id)s)
+            GROUP BY t.team_id, l.league_id, u.user_id
+            ORDER BY l.league_name, t.team_name
+        """, {"league_id": league_id}).fetchall()
 
 
 @app.get("/api/teams/{team_id}")
@@ -164,6 +187,14 @@ def rename_team(team_id: int, body: TeamRename):
             "UPDATE Team SET team_name = %s WHERE team_id = %s RETURNING team_id, team_name",
             (body.team_name, team_id),
         ).fetchone()
+
+
+# The captain deletes their team: roster rows CASCADE, a team with games is blocked by RESTRICT (409)
+@app.delete("/api/teams/{team_id}", status_code=204)
+def delete_team(team_id: int, user_id: int):
+    with db() as conn:
+        require_captain(conn, team_id, user_id)
+        conn.execute("DELETE FROM Team WHERE team_id = %s", (team_id,))
 
 
 # S4: the captain withdraws a pending invite; active and former members keep their rows

@@ -32,3 +32,9 @@
   .section-heading h2 { font-size: 1.25rem; }
   .home-bottom-band { align-items: flex-start; flex-direction: column; gap: 1rem; padding: 1.4rem; }
 }
+.connection-card { display: flex; align-items: center; gap: 0.85rem; margin-top: 1rem; padding: 0.9rem 1.1rem; border: 1px solid var(--line); background: white; font-size: 0.9rem; }
+.connection-dot { flex: none; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: #9aa6b5; }
+.connection-card.is-connected .connection-dot { background: #2f9a52; }
+.connection-card.is-down .connection-dot { background: #d93c3c; }
+.connection-card p { margin: 0; color: var(--ink-soft); }
+.connection-card strong { color: var(--ink); }

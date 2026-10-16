@@ -52,6 +52,15 @@ class ApiTest(unittest.TestCase):
         self.assertIn("team_count", rows[0])
         self.assertGreater(len(client.get("/api/leagues").json()), len(rows))
 
+    def test_teams_list_filters_by_league(self):
+        team_id = self.register().json()["team_id"]
+        rows = client.get("/api/teams", params={"league_id": self.league_id}).json()
+        self.assertTrue(all(r["league_id"] == self.league_id for r in rows))
+        mine = next(r for r in rows if r["team_id"] == team_id)
+        self.assertEqual(mine["member_count"], 1)
+        self.assertIn("captain_last_name", mine)
+        self.assertGreaterEqual(len(client.get("/api/teams").json()), len(rows))
+
     def test_s2_register_team_adds_captain_to_roster(self):
         r = self.register()
         self.assertEqual(r.status_code, 201)
@@ -104,6 +113,36 @@ class ApiTest(unittest.TestCase):
     def test_s3_missing_team_is_404(self):
         r = client.patch("/api/teams/999999", json={"user_id": self.captain, "team_name": self.name})
         self.assertEqual(r.status_code, 404)
+
+    def test_s2_new_team_uses_column_defaults(self):
+        team_id = self.register().json()["team_id"]
+        status, registered_today = sql(
+            "SELECT status, registered_at::date = CURRENT_DATE FROM Team WHERE team_id = %s", (team_id,))[0]
+        self.assertEqual((status, registered_today), ("active", True))
+
+    def test_delete_team_cascades_roster(self):
+        team_id = self.register().json()["team_id"]
+        self.invite(team_id)
+        r = client.delete(f"/api/teams/{team_id}", params={"user_id": self.captain})
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual(client.get(f"/api/teams/{team_id}").status_code, 404)
+        self.assertEqual(sql("SELECT COUNT(*) FROM RosterMembership WHERE team_id = %s", (team_id,))[0][0], 0)
+
+    def test_delete_team_non_captain_forbidden(self):
+        team_id = self.register().json()["team_id"]
+        r = client.delete(f"/api/teams/{team_id}", params={"user_id": self.other})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(client.get(f"/api/teams/{team_id}").status_code, 200)
+
+    def test_delete_team_with_games_is_readable_409(self):
+        team_id, captain_id = sql("""
+            SELECT t.team_id, t.captain_id FROM Team t
+            WHERE EXISTS (SELECT 1 FROM Game g WHERE t.team_id IN (g.home_team_id, g.away_team_id))
+            ORDER BY t.team_id LIMIT 1""")[0]
+        r = client.delete(f"/api/teams/{team_id}", params={"user_id": captain_id})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("can't be deleted", r.json()["detail"])
+        self.assertEqual(client.get(f"/api/teams/{team_id}").status_code, 200)
 
     def invite(self, team_id, status="invited"):
         sql("INSERT INTO RosterMembership (team_id, user_id, status, invited_at) VALUES (%s, %s, %s, NOW())",

@@ -27,8 +27,8 @@ CREATE TABLE Users (
     phone               VARCHAR(20) NOT NULL,
     role                VARCHAR(10) NOT NULL,
     suspended_until     DATE NULL,
-    is_active           BOOLEAN NOT NULL,
-    created_at          TIMESTAMPTZ NOT NULL,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (role IN ('player', 'official', 'admin'))
 
 );
@@ -38,8 +38,8 @@ CREATE TABLE Team (
     league_id           INT NOT NULL REFERENCES League(league_id) ON DELETE RESTRICT,
     captain_id          INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
     team_name           VARCHAR(60) NOT NULL,
-    status              VARCHAR(15) NOT NULL,
-    registered_at       TIMESTAMPTZ NOT NULL,
+    status              VARCHAR(15) NOT NULL DEFAULT 'active',
+    registered_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (league_id, team_name)
 );
 
@@ -47,8 +47,8 @@ CREATE TABLE RosterMembership (
     membership_id       INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     team_id             INT NOT NULL REFERENCES Team(team_id) ON DELETE CASCADE,
     user_id             INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
-    status              VARCHAR(15) NOT NULL,
-    invited_at          TIMESTAMPTZ NOT NULL,
+    status              VARCHAR(15) NOT NULL DEFAULT 'invited',
+    invited_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     joined_at           TIMESTAMPTZ,
     left_at             TIMESTAMPTZ,
     UNIQUE (team_id, user_id)
@@ -71,7 +71,7 @@ CREATE TABLE Game (
     end_time            TIMESTAMPTZ NOT NULL,
     game_type           VARCHAR(10) NOT NULL,
     playoff_round       INT NULL,
-    status              VARCHAR(10) NOT NULL,
+    status              VARCHAR(10) NOT NULL DEFAULT 'scheduled',
     UNIQUE (facility_id, start_time),
     CHECK(home_team_id <> away_team_id),
     CHECK(end_time > start_time)
@@ -84,8 +84,8 @@ CREATE TABLE ScoreReport (
     forfeit_team_id     INT REFERENCES Team(team_id) ON DELETE RESTRICT,
     home_score          INT,
     away_score          INT,
-    is_forfeit          BOOLEAN NOT NULL,
-    submitted_at        TIMESTAMPTZ NOT NULL,
+    is_forfeit          BOOLEAN NOT NULL DEFAULT FALSE,
+    submitted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (home_score >= 0 AND away_score >= 0)
 );
 
@@ -96,7 +96,7 @@ CREATE TABLE OfficiatingAssignment (
     assigned_by         INT NOT NULL REFERENCES Users(user_id) ON DELETE RESTRICT,
     position            VARCHAR(20) NOT NULL,
     status              VARCHAR(15) NOT NULL,
-    assigned_at         TIMESTAMPTZ NOT NULL,
+    assigned_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(game_id, official_id)
 );
 
@@ -108,6 +108,6 @@ CREATE TABLE IncidentReport (
     reviewed_by         INT REFERENCES Users(user_id) ON DELETE RESTRICT,
     incident_type       VARCHAR(20) NOT NULL,
     description         TEXT NOT NULL,
-    status              VARCHAR(15) NOT NULL,
-    filed_at            TIMESTAMPTZ NOT NULL
+    status              VARCHAR(15) NOT NULL DEFAULT 'open',
+    filed_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -1,5 +1,25 @@
 import '../styles/Home.css'
 import { Link } from 'react-router-dom'
+import { useApi, type Health } from '../api'
+
+// Proves the UI is talking to the database (Task 4)
+function ConnectionStatus() {
+  const { data, error, loading } = useApi<Health>('/api/health')
+  const state = loading ? '' : data ? 'is-connected' : 'is-down'
+
+  return (
+    <div className={`connection-card ${state}`} role="status">
+      <span className="connection-dot" aria-hidden="true" />
+      {loading && <p>Checking database connection…</p>}
+      {data && (
+        <p>
+          <strong>Connected to {data.version.split(' on ')[0]}</strong> · database “{data.database}” · {data.leagues} leagues, {data.teams} teams
+        </p>
+      )}
+      {error && <p><strong>Not connected.</strong> {error}</p>}
+    </div>
+  )
+}
 
 function Home() {
   return (
@@ -15,6 +35,7 @@ function Home() {
           </div>
         </div>
       </section>
+      <ConnectionStatus />
 
       <section className="home-section">
         <div className="section-heading">
