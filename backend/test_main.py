@@ -171,5 +171,84 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(len(client.get(f"/api/teams/{team_id}").json()["roster"]), 2)
 
 
+class ReportTest(unittest.TestCase):
+    def setUp(self):
+        # The league with the most forfeits, so the forfeit rule is exercised
+        self.league_id = sql("""
+            SELECT g.league_id FROM Game g JOIN ScoreReport s ON s.game_id = g.game_id
+            GROUP BY g.league_id ORDER BY COUNT(*) FILTER (WHERE s.is_forfeit) DESC, g.league_id LIMIT 1""")[0][0]
+
+    def test_standings_totals_add_up(self):
+        r = client.get("/api/reports/standings", params={"league_id": self.league_id})
+        self.assertEqual(r.status_code, 200)
+        rows = r.json()
+        team_count = sql("SELECT COUNT(*) FROM Team WHERE league_id = %s", (self.league_id,))[0][0]
+        self.assertEqual(len(rows), team_count)
+        for t in rows:
+            self.assertEqual(t["wins"] + t["losses"] + t["ties"], t["played"])
+            self.assertEqual(t["point_diff"], t["points_for"] - t["points_against"])
+        self.assertEqual(sum(t["wins"] for t in rows), sum(t["losses"] for t in rows))
+        reported = sql("""
+            SELECT COUNT(*) FROM Game g JOIN ScoreReport s ON s.game_id = g.game_id
+            WHERE g.league_id = %s AND g.game_type = 'regular'""", (self.league_id,))[0][0]
+        self.assertEqual(sum(t["played"] for t in rows), 2 * reported)
+
+    def test_standings_sorted_by_wins_then_diff(self):
+        rows = client.get("/api/reports/standings", params={"league_id": self.league_id}).json()
+        keys = [(t["wins"], t["point_diff"]) for t in rows]
+        self.assertEqual(keys, sorted(keys, reverse=True))
+
+    def test_standings_forfeit_is_a_loss(self):
+        forfeits = sql("""
+            SELECT s.forfeit_team_id, COUNT(*) FROM Game g JOIN ScoreReport s ON s.game_id = g.game_id
+            WHERE g.league_id = %s AND s.is_forfeit GROUP BY 1""", (self.league_id,))
+        if not forfeits:
+            self.skipTest("no forfeits in seed data")
+        rows = {t["team_id"]: t for t in client.get(
+            "/api/reports/standings", params={"league_id": self.league_id}).json()}
+        for team_id, n in forfeits:
+            self.assertGreaterEqual(rows[team_id]["losses"], n)
+
+    def test_standings_skips_incomplete_latest_report(self):
+        def played():
+            rows = client.get("/api/reports/standings", params={"league_id": self.league_id}).json()
+            return sum(t["played"] for t in rows), sum(t["ties"] for t in rows)
+
+        before = played()
+        game_id = sql("SELECT game_id FROM Game WHERE league_id = %s AND status = 'completed' LIMIT 1",
+                      (self.league_id,))[0][0]
+        official = sql("SELECT user_id FROM Users WHERE role = 'official' LIMIT 1")[0][0]
+        # Newer reports win, so these hide the game's real result: no scores, then a forfeit with no team
+        for forfeit in (False, True):
+            report_id = sql("""INSERT INTO ScoreReport (game_id, submitted_by, is_forfeit, submitted_at)
+                               VALUES (%s, %s, %s, NOW()) RETURNING report_id""", (game_id, official, forfeit))[0][0]
+            try:
+                after = played()
+                self.assertEqual(after[0], before[0] - 2)
+                self.assertLessEqual(after[1], before[1])
+            finally:
+                sql("DELETE FROM ScoreReport WHERE report_id = %s", (report_id,))
+
+    def test_standings_unknown_league_is_404(self):
+        self.assertEqual(client.get("/api/reports/standings", params={"league_id": 999999}).status_code, 404)
+
+    def test_participation_matches_league_list(self):
+        rows = client.get("/api/reports/participation", params={"term": "Fall 2026"}).json()
+        leagues = {l["league_id"]: l for l in client.get("/api/leagues", params={"term": "Fall 2026"}).json()}
+        self.assertEqual({r["league_id"] for r in rows}, set(leagues))
+        for r in rows:
+            self.assertEqual(r["teams"], leagues[r["league_id"]]["team_count"])
+            games = sql("SELECT COUNT(*) FROM Game WHERE league_id = %s", (r["league_id"],))[0][0]
+            self.assertEqual(r["games_played"] + r["games_remaining"], games)
+            active = sql("""
+                SELECT COUNT(DISTINCT rm.user_id) FROM RosterMembership rm JOIN Team t ON t.team_id = rm.team_id
+                WHERE t.league_id = %s AND rm.status = 'active'""", (r["league_id"],))[0][0]
+            self.assertEqual(r["active_players"], active)
+
+    def test_participation_without_term_lists_every_league(self):
+        rows = client.get("/api/reports/participation").json()
+        self.assertEqual(len(rows), len(client.get("/api/leagues").json()))
+
+
 if __name__ == "__main__":
     unittest.main()
