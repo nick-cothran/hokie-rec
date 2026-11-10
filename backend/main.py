@@ -155,14 +155,6 @@ def require_unlocked(team: dict):
         raise HTTPException(409, f"The roster is locked (lock date {fmt_date(team['roster_lock_date'])}).")
 
 
-def require_captain(conn, team_id, user_id):
-    team = conn.execute("SELECT captain_id FROM Team WHERE team_id = %s", (team_id,)).fetchone()
-    if team is None:
-        raise HTTPException(404, "Team not found.")
-    if team["captain_id"] != user_id:
-        raise HTTPException(403, "Only the team captain can do that.")
-
-
 @app.get("/api/health")
 def health():
     with db() as conn:
@@ -261,7 +253,7 @@ def get_team(team_id: int):
 @app.patch("/api/teams/{team_id}")
 def rename_team(team_id: int, body: TeamRename, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user["user_id"])
+        require_team_captain(team_rules(conn, team_id), user)
         return conn.execute(
             "UPDATE Team SET team_name = %s WHERE team_id = %s RETURNING team_id, team_name",
             (body.team_name, team_id),
@@ -272,7 +264,7 @@ def rename_team(team_id: int, body: TeamRename, user: AuthenticatedUser):
 @app.delete("/api/teams/{team_id}", status_code=204)
 def delete_team(team_id: int, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user["user_id"])
+        require_team_captain(team_rules(conn, team_id), user)
         conn.execute("DELETE FROM Team WHERE team_id = %s", (team_id,))
 
 
@@ -430,6 +422,80 @@ def hand_off_captaincy(team_id: int, body: NewCaptain, user: AuthenticatedUser):
             raise HTTPException(409, "The new captain must be an active member of this team.")
         return conn.execute("UPDATE Team SET captain_id = %s WHERE team_id = %s RETURNING team_id, captain_id",
                             (body.user_id, team_id)).fetchone()
+
+
+# A game with its league, place, teams (null for an undecided playoff game) and latest score; alias g
+GAME_COLUMNS = """
+    g.game_id, g.league_id, l.league_name, g.start_time, g.end_time, f.facility_name, f.location,
+    g.home_team_id, h.team_name AS home_team_name, g.away_team_id, a.team_name AS away_team_name,
+    g.playoff_round, g.next_game_id, g.status, s.home_score, s.away_score, s.forfeit_team_id
+"""
+GAME_JOINS = """
+    JOIN LeagueView l ON l.league_id = g.league_id
+    JOIN Facility f ON f.facility_id = g.facility_id
+    LEFT JOIN Team h ON h.team_id = g.home_team_id
+    LEFT JOIN Team a ON a.team_id = g.away_team_id
+    LEFT JOIN LatestScoreReport s ON s.game_id = g.game_id
+"""
+
+
+# Schedule and results, by league or team
+@app.get("/api/games")
+def list_games(league_id: int | None = None, team_id: int | None = None):
+    with db() as conn:
+        return conn.execute(f"""
+            SELECT {GAME_COLUMNS} FROM Game g {GAME_JOINS}
+            WHERE (%(league_id)s::int IS NULL OR g.league_id = %(league_id)s)
+              AND (%(team_id)s::int IS NULL OR %(team_id)s IN (g.home_team_id, g.away_team_id))
+            ORDER BY g.start_time, g.game_id
+        """, {"league_id": league_id, "team_id": team_id}).fetchall()
+
+
+# The signed-in official's assignments; anyone else has none
+@app.get("/api/me/assignments")
+def my_assignments(user: AuthenticatedUser):
+    with db() as conn:
+        return conn.execute(f"""
+            SELECT oa.assignment_id, oa.position, oa.status AS assignment_status,
+                   oa.status = 'assigned' AND g.start_time > NOW() AS can_respond, {GAME_COLUMNS}
+            FROM OfficiatingAssignment oa JOIN Game g ON g.game_id = oa.game_id {GAME_JOINS}
+            WHERE oa.official_id = %s
+            ORDER BY g.start_time, g.game_id
+        """, (user["user_id"],)).fetchall()
+
+
+def answer_assignment(assignment_id: int, user: dict, status: str):
+    """The official answers a pending assignment once, before the game starts."""
+    if user["role"] != "official":  # a demoted official keeps their rows but can't answer them
+        raise HTTPException(404, "You don't have that assignment.")
+    user_id = user["user_id"]
+    with db() as conn:
+        # One conditional UPDATE, so two tabs answering at once can't both win
+        if conn.execute("""
+            UPDATE OfficiatingAssignment oa SET status = %s FROM Game g
+            WHERE g.game_id = oa.game_id AND oa.assignment_id = %s AND oa.official_id = %s
+              AND oa.status = 'assigned' AND g.start_time > NOW()
+        """, (status, assignment_id, user_id)).rowcount:
+            return
+        row = conn.execute("""
+            SELECT oa.status FROM OfficiatingAssignment oa
+            WHERE oa.assignment_id = %s AND oa.official_id = %s
+        """, (assignment_id, user_id)).fetchone()
+    if row is None:  # same answer for someone else's assignment, so ids reveal nothing
+        raise HTTPException(404, "You don't have that assignment.")
+    if row["status"] != "assigned":
+        raise HTTPException(409, "You've already answered this assignment.")
+    raise HTTPException(409, "This game has already started.")
+
+
+@app.post("/api/assignments/{assignment_id}/accept", status_code=204)
+def accept_assignment(assignment_id: int, user: AuthenticatedUser):
+    answer_assignment(assignment_id, user, "accepted")
+
+
+@app.post("/api/assignments/{assignment_id}/decline", status_code=204)
+def decline_assignment(assignment_id: int, user: AuthenticatedUser):
+    answer_assignment(assignment_id, user, "declined")
 
 
 # Report 1: regular-season standings from each game's latest score report (LatestScoreReport view); a forfeit is a loss for the forfeiting team
