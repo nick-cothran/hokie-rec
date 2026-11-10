@@ -194,3 +194,27 @@ export type Participation = {
   games_played: number
   games_remaining: number
 }
+
+// One game with its latest score (GET /api/games). Team fields are null for an undecided playoff game.
+export type Game = {
+  game_id: number
+  league_id: number
+  league_name: string
+  start_time: string
+  end_time: string
+  facility_name: string
+  location: string
+  home_team_id: number | null
+  home_team_name: string | null
+  away_team_id: number | null
+  away_team_name: string | null
+  playoff_round: number | null
+  next_game_id: number | null
+  status: string
+  home_score: number | null
+  away_score: number | null
+  forfeit_team_id: number | null
+}
+
+// One of the signed-in official's assignments (GET /api/me/assignments)
+export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean }
