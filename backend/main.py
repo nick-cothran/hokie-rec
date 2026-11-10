@@ -1,26 +1,16 @@
 import psycopg
-from psycopg.rows import dict_row
-from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated
 
-# Load environment variables from the project root
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-
-DATABASE_URL = os.environ["DATABASE_URL"]
-
-
-def db():
-    # Commits when the `with` block ends, rolls back if it raises
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+from database import db
+from auth import AuthenticatedUser, router as auth_router
 
 
 @asynccontextmanager
@@ -32,11 +22,29 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(auth_router)
+ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
+
+
+@app.middleware("http")
+async def protect_browser_requests(request: Request, call_next):
+    # A custom header forces cross-origin browser writes through CORS preflight.
+    # Check Origin too: SameSite alone does not protect against sibling origins.
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        if request.headers.get("x-requested-with") != "HokieRec" or (origin is not None and origin not in ALLOWED_ORIGINS):
+            return JSONResponse(status_code=403, content={"detail": "Request could not be verified. Refresh the page and try again."})
+    response = await call_next(request)
+    if request.url.path.startswith("/api/auth/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 # Allow requests from the React development server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -67,14 +75,16 @@ TeamName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
 
 
 class NewTeam(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     league_id: int
     team_name: TeamName
-    user_id: int  # shortcut: caller says who they are (no login), add real auth if this leaves the class demo
 
 
 class TeamRename(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     team_name: TeamName
-    user_id: int
 
 
 def require_captain(conn, team_id, user_id):
@@ -95,14 +105,6 @@ def health():
     return {"status": "connected", **row}
 
 
-@app.get("/api/users")
-def list_users():
-    with db() as conn:
-        return conn.execute(
-            "SELECT user_id, first_name, last_name, role FROM Users ORDER BY last_name, first_name"
-        ).fetchall()
-
-
 # S1: browse leagues by sport and term
 @app.get("/api/leagues")
 def list_leagues(sport: str | None = None, term: str | None = None):
@@ -120,12 +122,12 @@ def list_leagues(sport: str | None = None, term: str | None = None):
 
 # S2: register a team; the captain's roster row goes in the same transaction
 @app.post("/api/teams", status_code=201)
-def register_team(body: NewTeam):
+def register_team(body: NewTeam, user: AuthenticatedUser):
     with db() as conn:
         eligible = conn.execute("""
             SELECT 1 FROM Users WHERE user_id = %s AND role = 'player' AND is_active
               AND (suspended_until IS NULL OR suspended_until < CURRENT_DATE)
-        """, (body.user_id,)).fetchone()
+        """, (user["user_id"],)).fetchone()
         if not eligible:
             raise HTTPException(403, "Only active, non-suspended players can register a team.")
         # status and registered_at come from their column DEFAULTs ('active', NOW())
@@ -133,11 +135,11 @@ def register_team(body: NewTeam):
             INSERT INTO Team (league_id, captain_id, team_name)
             VALUES (%s, %s, %s)
             RETURNING team_id
-        """, (body.league_id, body.user_id, body.team_name)).fetchone()
+        """, (body.league_id, user["user_id"], body.team_name)).fetchone()
         conn.execute("""
             INSERT INTO RosterMembership (team_id, user_id, status, invited_at, joined_at)
             VALUES (%s, %s, 'active', NOW(), NOW())
-        """, (team["team_id"], body.user_id))
+        """, (team["team_id"], user["user_id"]))
     return team
 
 
@@ -180,9 +182,9 @@ def get_team(team_id: int):
 
 # S3: the captain renames their team
 @app.patch("/api/teams/{team_id}")
-def rename_team(team_id: int, body: TeamRename):
+def rename_team(team_id: int, body: TeamRename, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, body.user_id)
+        require_captain(conn, team_id, user["user_id"])
         return conn.execute(
             "UPDATE Team SET team_name = %s WHERE team_id = %s RETURNING team_id, team_name",
             (body.team_name, team_id),
@@ -191,17 +193,17 @@ def rename_team(team_id: int, body: TeamRename):
 
 # The captain deletes their team: roster rows CASCADE, a team with games is blocked by RESTRICT (409)
 @app.delete("/api/teams/{team_id}", status_code=204)
-def delete_team(team_id: int, user_id: int):
+def delete_team(team_id: int, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user_id)
+        require_captain(conn, team_id, user["user_id"])
         conn.execute("DELETE FROM Team WHERE team_id = %s", (team_id,))
 
 
 # S4: the captain withdraws a pending invite; active and former members keep their rows
 @app.delete("/api/teams/{team_id}/invites/{player_id}", status_code=204)
-def withdraw_invite(team_id: int, player_id: int, user_id: int):
+def withdraw_invite(team_id: int, player_id: int, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user_id)
+        require_captain(conn, team_id, user["user_id"])
         deleted = conn.execute("""
             DELETE FROM RosterMembership
             WHERE team_id = %s AND user_id = %s AND status = 'invited'

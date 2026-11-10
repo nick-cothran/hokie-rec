@@ -1,13 +1,56 @@
-# Runs against the seeded Docker DB: `python -m unittest` from /backend
+# Integration tests use a disposable PostgreSQL schema; existing application data is untouched.
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
+from pathlib import Path
 
 import psycopg
 from fastapi.testclient import TestClient
 
-from main import DATABASE_URL, app
+from psycopg import sql as pgsql
+from psycopg.conninfo import make_conninfo
+import database
 
-client = TestClient(app)
+BASE_URL = database.DATABASE_URL
+TEST_SCHEMA = "hokie_rec_test_" + uuid.uuid4().hex
+database.DATABASE_URL = make_conninfo(BASE_URL, options=f"-c search_path={TEST_SCHEMA}")
+DATABASE_URL = database.DATABASE_URL
+
+from main import app
+from auth import COOKIE_NAME, password_hasher, token_hash
+
+PASSWORD = "Test-only-password-2026"
+
+
+def setUpModule():
+    with psycopg.connect(BASE_URL) as conn:
+        conn.execute(pgsql.SQL("CREATE SCHEMA {}").format(pgsql.Identifier(TEST_SCHEMA)))
+    try:
+        root = Path(__file__).resolve().parents[1]
+        with psycopg.connect(DATABASE_URL) as conn:
+            conn.execute((root / "db/schema.sql").read_text())
+            conn.execute((root / "db/seed.sql").read_text())
+            conn.execute("INSERT INTO UserCredentials (user_id, password_hash) SELECT user_id, %s FROM Users",
+                         (password_hasher.hash(PASSWORD),))
+    except Exception:
+        tearDownModule()
+        raise
+
+
+def tearDownModule():
+    with psycopg.connect(BASE_URL) as conn:
+        conn.execute(pgsql.SQL("DROP SCHEMA {} CASCADE").format(pgsql.Identifier(TEST_SCHEMA)))
+    database.DATABASE_URL = BASE_URL
+
+client = TestClient(app, headers={"X-Requested-With": "HokieRec"})
+
+
+def sign_in(user_id):
+    pid = sql("SELECT vt_pid FROM Users WHERE user_id = %s", (user_id,))[0][0]
+    response = client.post("/api/auth/login", json={"vt_pid": pid, "password": PASSWORD})
+    if response.status_code != 200:
+        raise AssertionError(response.text)
 
 
 def sql(query, params=()):
@@ -24,7 +67,9 @@ def eligible_players(n):
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
+        client.cookies.clear()
         self.captain, self.other = eligible_players(2)
+        sign_in(self.captain)
         self.league_id = sql("SELECT league_id FROM League ORDER BY league_id DESC LIMIT 1")[0][0]
         self.name = f"Test {uuid.uuid4().hex[:8]}"
 
@@ -32,18 +77,18 @@ class ApiTest(unittest.TestCase):
         sql("DELETE FROM Team WHERE team_name LIKE %s", (self.name + "%",))  # roster rows cascade
 
     def register(self, name=None, user_id=None):
+        if user_id is not None:
+            sign_in(user_id)
         return client.post("/api/teams", json={
-            "league_id": self.league_id, "team_name": name or self.name, "user_id": user_id or self.captain})
+            "league_id": self.league_id, "team_name": name or self.name})
 
     def test_health_reports_connection(self):
         body = client.get("/api/health").json()
         self.assertEqual(body["status"], "connected")
         self.assertIn("PostgreSQL", body["version"])
 
-    def test_users_list_hides_contact_info(self):
-        user = client.get("/api/users").json()[0]
-        self.assertNotIn("email", user)
-        self.assertNotIn("phone", user)
+    def test_user_picker_endpoint_removed(self):
+        self.assertEqual(client.get("/api/users").status_code, 404)
 
     def test_s1_leagues_filter(self):
         rows = client.get("/api/leagues", params={"sport": "Soccer"}).json()
@@ -75,7 +120,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(r.json()["detail"], "A team with that name already exists in this league.")
 
     def test_s2_unknown_league_is_readable_409(self):
-        r = client.post("/api/teams", json={"league_id": 999999, "team_name": self.name, "user_id": self.captain})
+        r = client.post("/api/teams", json={"league_id": 999999, "team_name": self.name})
         self.assertEqual(r.status_code, 409)
         self.assertEqual(r.json()["detail"], "That league does not exist.")
 
@@ -84,10 +129,12 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(self.register(user_id=official).status_code, 403)
 
     def test_s2_rejects_suspended_player(self):
-        suspended = sql("SELECT user_id FROM Users WHERE role = 'player' AND suspended_until >= CURRENT_DATE LIMIT 1")
-        if not suspended:
-            self.skipTest("no currently suspended player in seed data")
-        self.assertEqual(self.register(user_id=suspended[0][0]).status_code, 403)
+        previous = sql("SELECT suspended_until FROM Users WHERE user_id = %s", (self.other,))[0][0]
+        sql("UPDATE Users SET suspended_until = CURRENT_DATE + 1 WHERE user_id = %s", (self.other,))
+        try:
+            self.assertEqual(self.register(user_id=self.other).status_code, 403)
+        finally:
+            sql("UPDATE Users SET suspended_until = %s WHERE user_id = %s", (previous, self.other))
 
     def test_bad_text_is_readable_422_not_500(self):
         r = client.get("/api/leagues", params={"sport": "a\x00"})
@@ -100,18 +147,19 @@ class ApiTest(unittest.TestCase):
 
     def test_s3_captain_renames_team(self):
         team_id = self.register().json()["team_id"]
-        r = client.patch(f"/api/teams/{team_id}", json={"user_id": self.captain, "team_name": self.name + "b"})
+        r = client.patch(f"/api/teams/{team_id}", json={"team_name": self.name + "b"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(client.get(f"/api/teams/{team_id}").json()["team_name"], self.name + "b")
 
     def test_s3_non_captain_cannot_rename(self):
         team_id = self.register().json()["team_id"]
-        r = client.patch(f"/api/teams/{team_id}", json={"user_id": self.other, "team_name": self.name + "b"})
+        sign_in(self.other)
+        r = client.patch(f"/api/teams/{team_id}", json={"team_name": self.name + "b"})
         self.assertEqual(r.status_code, 403)
         self.assertEqual(client.get(f"/api/teams/{team_id}").json()["team_name"], self.name)
 
     def test_s3_missing_team_is_404(self):
-        r = client.patch("/api/teams/999999", json={"user_id": self.captain, "team_name": self.name})
+        r = client.patch("/api/teams/999999", json={"team_name": self.name})
         self.assertEqual(r.status_code, 404)
 
     def test_s2_new_team_uses_column_defaults(self):
@@ -123,14 +171,15 @@ class ApiTest(unittest.TestCase):
     def test_delete_team_cascades_roster(self):
         team_id = self.register().json()["team_id"]
         self.invite(team_id)
-        r = client.delete(f"/api/teams/{team_id}", params={"user_id": self.captain})
+        r = client.delete(f"/api/teams/{team_id}")
         self.assertEqual(r.status_code, 204)
         self.assertEqual(client.get(f"/api/teams/{team_id}").status_code, 404)
         self.assertEqual(sql("SELECT COUNT(*) FROM RosterMembership WHERE team_id = %s", (team_id,))[0][0], 0)
 
     def test_delete_team_non_captain_forbidden(self):
         team_id = self.register().json()["team_id"]
-        r = client.delete(f"/api/teams/{team_id}", params={"user_id": self.other})
+        sign_in(self.other)
+        r = client.delete(f"/api/teams/{team_id}")
         self.assertEqual(r.status_code, 403)
         self.assertEqual(client.get(f"/api/teams/{team_id}").status_code, 200)
 
@@ -139,7 +188,8 @@ class ApiTest(unittest.TestCase):
             SELECT t.team_id, t.captain_id FROM Team t
             WHERE EXISTS (SELECT 1 FROM Game g WHERE t.team_id IN (g.home_team_id, g.away_team_id))
             ORDER BY t.team_id LIMIT 1""")[0]
-        r = client.delete(f"/api/teams/{team_id}", params={"user_id": captain_id})
+        sign_in(captain_id)
+        r = client.delete(f"/api/teams/{team_id}")
         self.assertEqual(r.status_code, 409)
         self.assertIn("can't be deleted", r.json()["detail"])
         self.assertEqual(client.get(f"/api/teams/{team_id}").status_code, 200)
@@ -151,7 +201,7 @@ class ApiTest(unittest.TestCase):
     def test_s4_captain_withdraws_invite(self):
         team_id = self.register().json()["team_id"]
         self.invite(team_id)
-        r = client.delete(f"/api/teams/{team_id}/invites/{self.other}", params={"user_id": self.captain})
+        r = client.delete(f"/api/teams/{team_id}/invites/{self.other}")
         self.assertEqual(r.status_code, 204)
         roster = client.get(f"/api/teams/{team_id}").json()["roster"]
         self.assertNotIn(self.other, [m["user_id"] for m in roster])
@@ -159,18 +209,274 @@ class ApiTest(unittest.TestCase):
     def test_s4_non_captain_cannot_withdraw(self):
         team_id = self.register().json()["team_id"]
         self.invite(team_id)
-        r = client.delete(f"/api/teams/{team_id}/invites/{self.other}", params={"user_id": self.other})
+        sign_in(self.other)
+        r = client.delete(f"/api/teams/{team_id}/invites/{self.other}")
         self.assertEqual(r.status_code, 403)
         self.assertEqual(len(client.get(f"/api/teams/{team_id}").json()["roster"]), 2)
 
     def test_s4_active_member_is_not_deleted(self):
         team_id = self.register().json()["team_id"]
         self.invite(team_id, status="active")
-        r = client.delete(f"/api/teams/{team_id}/invites/{self.other}", params={"user_id": self.captain})
+        r = client.delete(f"/api/teams/{team_id}/invites/{self.other}")
         self.assertEqual(r.status_code, 404)
         self.assertEqual(len(client.get(f"/api/teams/{team_id}").json()["roster"]), 2)
 
 
+class AuthTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        sql("DELETE FROM AuthSession")
+        sql("DELETE FROM AuthLoginAttempt")
+        self.user_id = sql("SELECT user_id FROM Users WHERE vt_pid = 'simvt0001'")[0][0]
+
+    def login(self, pid="simvt0001", password=PASSWORD):
+        return client.post("/api/auth/login", json={"vt_pid": pid, "password": password})
+
+    def test_login_cookie_and_identity(self):
+        response = self.login()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()), {"user_id", "first_name", "last_name", "role"})
+        self.assertEqual(response.json()["user_id"], self.user_id)
+        cookie = response.headers["set-cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=lax", cookie)
+        self.assertIn("Path=/api", cookie)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        token = client.cookies.get(COOKIE_NAME)
+        self.assertEqual(sql("SELECT token_hash FROM AuthSession")[0][0], token_hash(token))
+        self.assertNotEqual(token, token_hash(token))
+        self.assertEqual(client.get("/api/auth/me").json(), response.json())
+
+    def test_pid_normalized(self):
+        self.assertEqual(self.login(pid="  SIMVT0001  ").status_code, 200)
+
+    def test_invalid_credentials_have_same_message(self):
+        wrong = self.login(password="wrong-password")
+        unknown = self.login(pid="unknown")
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(wrong.json(), unknown.json())
+        self.assertEqual(sql("SELECT COUNT(*) FROM AuthSession")[0][0], 0)
+
+    def test_no_credentials_cannot_login(self):
+        sql("DELETE FROM UserCredentials WHERE user_id = %s", (self.user_id,))
+        try:
+            self.assertEqual(self.login().status_code, 401)
+        finally:
+            sql("INSERT INTO UserCredentials VALUES (%s, %s)", (self.user_id, password_hasher.hash(PASSWORD)))
+
+    def test_inactive_user_cannot_login_or_use_session(self):
+        self.login()
+        sql("UPDATE Users SET is_active = FALSE WHERE user_id = %s", (self.user_id,))
+        try:
+            self.assertEqual(client.get("/api/auth/me").status_code, 401)
+            self.assertEqual(self.login().status_code, 401)
+        finally:
+            sql("UPDATE Users SET is_active = TRUE WHERE user_id = %s", (self.user_id,))
+
+    def test_session_expires_and_forged_cookie_fails(self):
+        self.login()
+        sql("UPDATE AuthSession SET expires_at = NOW() - INTERVAL '1 second'")
+        self.assertEqual(client.get("/api/auth/me").status_code, 401)
+        client.cookies.clear()
+        client.cookies.set(COOKIE_NAME, "forged", path="/api")
+        self.assertEqual(client.get("/api/auth/me").status_code, 401)
+
+    def test_logout_revokes_token_and_is_idempotent(self):
+        self.login()
+        token = client.cookies.get(COOKIE_NAME)
+        self.assertEqual(client.post("/api/auth/logout").status_code, 204)
+        self.assertIsNone(client.cookies.get(COOKIE_NAME))
+        client.cookies.set(COOKIE_NAME, token, path="/api")
+        self.assertEqual(client.get("/api/auth/me").status_code, 401)
+        self.assertEqual(client.post("/api/auth/logout").status_code, 204)
+
+    def test_login_rotates_previous_session(self):
+        self.login()
+        old = client.cookies.get(COOKIE_NAME)
+        self.login()
+        self.assertNotEqual(client.cookies.get(COOKIE_NAME), old)
+        self.assertEqual(sql("SELECT COUNT(*) FROM AuthSession WHERE token_hash = %s", (token_hash(old),))[0][0], 0)
+
+    def test_login_throttling_and_window_reset(self):
+        for _ in range(10):
+            self.assertEqual(self.login(password="wrong").status_code, 401)
+        response = self.login()
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "900")
+        sql("UPDATE AuthLoginAttempt SET window_start = NOW() - INTERVAL '16 minutes'")
+        self.assertEqual(self.login().status_code, 200)
+
+    def test_browser_csrf_and_cors(self):
+        payload = {"vt_pid": "simvt0001", "password": PASSWORD}
+        with TestClient(app) as browser:
+            self.assertEqual(browser.post("/api/auth/login", json=payload).status_code, 403)
+        self.assertEqual(client.post("/api/auth/login", json=payload,
+                                    headers={"Origin": "https://evil.example"}).status_code, 403)
+        response = client.post("/api/auth/login", json=payload, headers={"Origin": "http://localhost:5173"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["access-control-allow-credentials"], "true")
+        self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5173")
+
+    def test_anonymous_writes_rejected_even_with_user_id(self):
+        cases = [
+            ("POST", "/api/teams", {"league_id": 1, "team_name": "Forged", "user_id": self.user_id}),
+            ("PATCH", "/api/teams/1", {"team_name": "Forged", "user_id": self.user_id}),
+            ("DELETE", f"/api/teams/1?user_id={self.user_id}", None),
+            ("DELETE", f"/api/teams/1/invites/2?user_id={self.user_id}", None),
+        ]
+        for method, path, body in cases:
+            with self.subTest(method=method, path=path):
+                self.assertEqual(client.request(method, path, json=body).status_code, 401)
+
+    def test_authenticated_user_cannot_forge_captain(self):
+        team_id = sql("SELECT team_id FROM Team WHERE captain_id = %s LIMIT 1", (self.user_id,))[0][0]
+        other = sql("SELECT user_id FROM Users WHERE vt_pid = 'simvt0002'")[0][0]
+        sign_in(other)
+        self.assertEqual(client.patch(f"/api/teams/{team_id}", json={"team_name": "Forged", "user_id": self.user_id}).status_code, 422)
+        self.assertEqual(client.patch(f"/api/teams/{team_id}", json={"team_name": "Forged"}).status_code, 403)
+        self.assertEqual(client.delete(f"/api/teams/{team_id}?user_id={self.user_id}").status_code, 403)
+
+    def test_auth_migration_is_rerunnable(self):
+        from migrate_auth import migrate
+        migrate()
+        migrate()
+        self.assertEqual(sql("SELECT COUNT(*) FROM Users")[0][0], 135)
+
+    def test_demo_setup_preserves_existing_credentials_and_reset_revokes(self):
+        from seed_demo_accounts import seed_demo_accounts
+        before = sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0]
+        seed_demo_accounts("Replacement-demo-pass")
+        self.assertEqual(sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0], before)
+        self.login()
+        seed_demo_accounts("Replacement-demo-pass", reset=True)
+        self.assertEqual(client.get("/api/auth/me").status_code, 401)
+        self.assertEqual(self.login(password="Replacement-demo-pass").status_code, 200)
+        hashes = sql("SELECT password_hash FROM UserCredentials")
+        self.assertEqual(len(hashes), 135)
+        self.assertEqual(len({row[0] for row in hashes}), 135)
+        self.assertTrue(all(password_hasher.verify("Replacement-demo-pass", row[0]) for row in hashes))
+        # Restore fixture passwords for subsequent tests.
+        sql("UPDATE UserCredentials SET password_hash = %s", (password_hasher.hash(PASSWORD),))
+
+
+class SignUpTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        sql("DELETE FROM AuthLoginAttempt")
+        self.pid = "signup_" + uuid.uuid4().hex[:16]
+        self.details = {
+            "vt_pid": self.pid, "first_name": "Test", "last_name": "Player",
+            "email": self.pid + "@example.com", "phone": "540-555-0199",
+            "password": "A new player password",
+        }
+
+    def tearDown(self):
+        # Only remove profiles/teams created by this test, never seeded people.
+        sql("DELETE FROM Team WHERE captain_id IN (SELECT user_id FROM Users WHERE LEFT(vt_pid, LENGTH(%s)) = %s)",
+            (self.pid, self.pid))
+        sql("DELETE FROM Users WHERE LEFT(vt_pid, LENGTH(%s)) = %s", (self.pid, self.pid))
+
+    def register(self, **changes):
+        return client.post("/api/auth/sign-up", json={**self.details, **changes})
+
+    def test_signup_creates_player_credentials_and_session(self):
+        response = self.register()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["role"], "player")
+        self.assertEqual(set(response.json()), {"user_id", "first_name", "last_name", "role"})
+        self.assertEqual(client.get("/api/auth/me").json(), response.json())
+        self.assertIn("HttpOnly", response.headers["set-cookie"])
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        stored = sql("SELECT c.password_hash FROM UserCredentials c JOIN Users u USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0]
+        self.assertNotEqual(stored, self.details["password"])
+        self.assertTrue(password_hasher.verify(self.details["password"], stored))
+        team = client.post("/api/teams", json={"league_id": 1, "team_name": self.pid})
+        self.assertEqual(team.status_code, 201)
+        self.assertEqual(client.get(f"/api/teams/{team.json()['team_id']}").json()["captain_id"], response.json()["user_id"])
+        client.post("/api/auth/logout")
+        login = client.post("/api/auth/login", json={"vt_pid": self.pid, "password": self.details["password"]})
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["user_id"], response.json()["user_id"])
+
+    def test_signup_normalizes_identifiers_and_trims_names(self):
+        self.assertEqual(self.register(vt_pid="  " + self.pid.upper() + "  ", email=self.details["email"].upper(),
+                                       first_name=" Test ", last_name=" Player ").status_code, 201)
+        row = sql("SELECT vt_pid, email, first_name, last_name FROM Users WHERE vt_pid = %s", (self.pid,))[0]
+        self.assertEqual(row, (self.pid, self.details["email"], "Test", "Player"))
+
+    def test_duplicate_pid_and_email_are_case_insensitive(self):
+        self.assertEqual(self.register().status_code, 201)
+        for changes in ({"vt_pid": self.pid.upper(), "email": "different@example.com"},
+                        {"vt_pid": self.pid + "_other", "email": self.details["email"].upper()}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.register(**changes).status_code, 409)
+        self.assertEqual(sql("SELECT COUNT(*) FROM Users WHERE LEFT(vt_pid, LENGTH(%s)) = %s", (self.pid, self.pid))[0][0], 1)
+
+    def test_cannot_claim_seeded_pid_or_email(self):
+        before = sql("SELECT u.user_id, c.password_hash FROM Users u JOIN UserCredentials c USING (user_id) WHERE u.vt_pid = 'simvt0001'")[0]
+        self.assertEqual(self.register(vt_pid="SIMVT0001").status_code, 422)
+        self.assertEqual(self.register(email="JESSICA.THOMPSON.001@EXAMPLE.COM").status_code, 409)
+        after = sql("SELECT u.user_id, c.password_hash FROM Users u JOIN UserCredentials c USING (user_id) WHERE u.vt_pid = 'simvt0001'")[0]
+        self.assertEqual(before, after)
+
+    def test_privileged_fields_rejected(self):
+        for changes in ({"role": "admin"}, {"role": "official"}, {"user_id": 1}, {"is_active": False}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.register(**changes).status_code, 422)
+
+    def test_signup_validation(self):
+        for changes in ({"password": "hokie"}, {"password": "x" * 129}, {"email": "not-an-email"},
+                        {"email": "x" * 90 + "@example.com"}, {"phone": "--- ---"}, {"phone": "not-a-number"},
+                        {"first_name": "   "}, {"last_name": "x" * 51}, {"first_name": "a\x00b"},
+                        {"vt_pid": "bad pid"}, {"vt_pid": "x" * 41}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.register(**changes).status_code, 422)
+        self.assertEqual(sql("SELECT COUNT(*) FROM Users WHERE vt_pid = %s", (self.pid,))[0][0], 0)
+
+    def test_signup_requires_browser_csrf_header_and_trusted_origin(self):
+        with TestClient(app) as browser:
+            self.assertEqual(browser.post("/api/auth/sign-up", json=self.details).status_code, 403)
+        self.assertEqual(client.post("/api/auth/sign-up", json=self.details,
+                                    headers={"Origin": "https://evil.example"}).status_code, 403)
+
+    def test_signup_rate_limit_is_shared_across_pids(self):
+        for number in range(10):
+            self.assertEqual(self.register(vt_pid=self.pid + str(number)).status_code, 201 if number == 0 else 409)
+        response = self.register(vt_pid=self.pid + "blocked")
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["retry-after"], "900")
+        sql("UPDATE AuthLoginAttempt SET window_start = NOW() - INTERVAL '16 minutes'")
+        self.assertEqual(self.register(vt_pid=self.pid + "unblocked", email=self.pid + "_other@example.com").status_code, 201)
+
+    def test_concurrent_signups_cannot_duplicate_accounts(self):
+        def signup_once(_):
+            with TestClient(app, headers={"X-Requested-With": "HokieRec"}) as browser:
+                return browser.post("/api/auth/sign-up", json=self.details).status_code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(sorted(pool.map(signup_once, range(2))), [201, 409])
+        self.assertEqual(sql("SELECT COUNT(*) FROM Users u JOIN UserCredentials c USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0], 1)
+
+    def test_signup_is_atomic_if_session_creation_fails(self):
+        with patch("auth.issue_session", side_effect=RuntimeError("Simulated session failure")):
+            with self.assertRaises(RuntimeError):
+                self.register()
+        self.assertEqual(sql("SELECT COUNT(*) FROM Users WHERE vt_pid = %s", (self.pid,))[0][0], 0)
+
+    def test_demo_reset_does_not_change_registered_users(self):
+        from seed_demo_accounts import DEMO_PASSWORD, seed_demo_accounts
+        self.assertEqual(self.register().status_code, 201)
+        original_hash = sql("SELECT c.password_hash FROM UserCredentials c JOIN Users u USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0]
+        self.assertEqual(seed_demo_accounts(reset=True), 135)
+        self.assertEqual(sql("SELECT c.password_hash FROM UserCredentials c JOIN Users u USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0], original_hash)
+        self.assertEqual(client.get("/api/auth/me").status_code, 200)
+        for number in range(1, 136):
+            pid = f"simvt{number:04d}"
+            with self.subTest(pid=pid):
+                response = client.post("/api/auth/login", json={"vt_pid": pid, "password": DEMO_PASSWORD})
+                self.assertEqual(response.status_code, 200)
+        self.assertEqual(seed_demo_accounts(), 0)
+        sql("UPDATE UserCredentials SET password_hash = %s WHERE user_id IN (SELECT user_id FROM Users WHERE vt_pid LIKE 'simvt%%')",
+            (password_hasher.hash(PASSWORD),))
 class ReportTest(unittest.TestCase):
     def setUp(self):
         # The league with the most forfeits, so the forfeit rule is exercised

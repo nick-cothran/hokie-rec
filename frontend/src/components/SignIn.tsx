@@ -1,51 +1,69 @@
 import '../styles/SignIn.css'
-import { Link } from 'react-router-dom'
-import { useApi, type Role, type User } from '../api'
-import { fullName, useActingUser } from '../actingUser'
+import { useState, type FormEvent } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { fullName, useAuth } from '../auth'
+import { accountDestination, accountLink } from '../authNavigation'
 
-const ROLE_GROUPS: { role: Role; label: string }[] = [
-  { role: 'player', label: 'Players' },
-  { role: 'official', label: 'Officials' },
-  { role: 'admin', label: 'Administrators' },
-]
-
-// Stand-in for login: pick which seeded user the app acts as
 function SignIn() {
-  const { user, setUser } = useActingUser()
-  const users = useApi<User[]>('/api/users')
+  const { user, loading, error: sessionError, signIn, signOut } = useAuth()
+  const [pid, setPid] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
 
-  function choose(userId: string) {
-    setUser(users.data?.find(u => u.user_id === Number(userId)) ?? null)
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await signIn(pid, password)
+      setPassword('')
+      navigate(accountDestination(params.get('next')), { replace: true })
+    } catch (failure) {
+      setError((failure as Error).message)
+      setPassword('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function logout() {
+    setBusy(true)
+    setError('')
+    try { await signOut() } catch (failure) { setError((failure as Error).message) }
+    finally { setBusy(false) }
   }
 
   return (
     <main className="signin-page">
       <section className="signin-panel">
         <p className="eyebrow">Hokie Rec account</p>
-        <h1>Who's playing?</h1>
-        <p>Accounts aren't connected yet, so choose a user to act as. Only players can register teams, and only a team's captain can manage it.</p>
-        <div className="signin-form">
-          <label className="field">Acting as
-            <select value={user?.user_id ?? ''} onChange={e => choose(e.target.value)} disabled={!users.data}>
-              <option value="">{users.loading ? 'Loading users…' : 'Choose a user'}</option>
-              {ROLE_GROUPS.map(group => (
-                <optgroup key={group.role} label={group.label}>
-                  {users.data?.filter(u => u.role === group.role).map(u => (
-                    <option key={u.user_id} value={u.user_id}>{u.last_name}, {u.first_name}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
-          {users.error && <p className="notice notice-error" role="alert">{users.error}</p>}
-          {user && (
-            <p className="notice notice-success" role="status">
-              You're acting as {fullName(user)} ({user.role}). <Link to="/teams">Go to teams</Link>
-            </p>
-          )}
-          {user && <button className="button button-outline" type="button" onClick={() => setUser(null)}>Stop acting as {user.first_name}</button>}
-        </div>
-        <p className="signin-help">Just looking around? <Link to="/leagues">Browse leagues without choosing a user</Link>.</p>
+        <h1>{user ? 'Your account' : 'Welcome back.'}</h1>
+        {loading ? <p role="status">Checking your session…</p> : user ? (
+          <div className="signin-form">
+            <p>Signed in as <strong>{fullName(user)}</strong> ({user.role}).</p>
+            <Link className="button button-primary" to="/teams">Go to teams</Link>
+            <button className="button button-outline" type="button" disabled={busy} onClick={logout}>{busy ? 'Signing out…' : 'Sign out'}</button>
+          </div>
+        ) : (
+          <>
+            <p>Sign in with your Hokie Rec PID and password to manage your teams.</p>
+            <form className="signin-form" onSubmit={submit}>
+              <label className="field">PID
+                <input name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={pid} onChange={e => setPid(e.target.value)} maxLength={40} required disabled={busy} />
+              </label>
+              <label className="field">Password
+                <input name="password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} maxLength={128} required disabled={busy} />
+              </label>
+              <button className="button button-primary" type="submit" disabled={busy || !pid.trim() || !password}>{busy ? 'Signing in…' : 'Sign in'}</button>
+            </form>
+            <p className="signin-help">New to Hokie Rec? <Link to={accountLink('/sign-up', params.get('next'))}>Create an account</Link>.</p>
+          </>
+        )}
+        {(error || sessionError) && <p className="notice notice-error" role="alert">{error || sessionError}</p>}
+        <p className="signin-help">Just looking around? <Link to="/leagues">Browse leagues without signing in</Link>.</p>
       </section>
       <aside className="signin-aside"><p className="eyebrow">Hokie Rec</p><h2>Your season starts here.</h2><p>Register a team, rename it, and manage your roster's pending invites.</p><Link className="text-link" to="/leagues">Find a league <span aria-hidden="true">→</span></Link></aside>
     </main>
