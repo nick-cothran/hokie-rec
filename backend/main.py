@@ -123,7 +123,7 @@ def ineligible_reason(conn, user_id: int, league_id: int) -> str | None:
     if not row["player"]:
         return "Only active players can join teams."
     if row["suspended_until"]:
-        return f"Suspended until {fmt_date(row['suspended_until'])}."
+        return "Suspended players can't join teams."  # never reveal the disciplinary end date
     if row["in_league"]:
         return "Already on a team in this league."
     return None
@@ -278,16 +278,17 @@ def delete_team(team_id: int, user: AuthenticatedUser):
 
 
 # S4: the captain withdraws a pending invite, any time. A former member's re-invite becomes
-# 'removed' instead of being deleted, so their roster history stays.
+# 'removed' instead of being deleted, keeping their joined_at/left_at history.
 @app.delete("/api/teams/{team_id}/invites/{player_id}", status_code=204)
 def withdraw_invite(team_id: int, player_id: int, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user["user_id"])
+        # Same Team lock as accept, so a withdraw and an accept can't interleave
+        require_team_captain(team_rules(conn, team_id, for_update=True), user)
         changed = conn.execute("""
             DELETE FROM RosterMembership
             WHERE team_id = %s AND user_id = %s AND status = 'invited' AND joined_at IS NULL
         """, (team_id, player_id)).rowcount or conn.execute("""
-            UPDATE RosterMembership SET status = 'removed', left_at = NOW()
+            UPDATE RosterMembership SET status = 'removed'
             WHERE team_id = %s AND user_id = %s AND status = 'invited'
         """, (team_id, player_id)).rowcount
     if not changed:
@@ -313,7 +314,7 @@ def invite_player(team_id: int, body: Invite, user: AuthenticatedUser):
             raise HTTPException(409, reason)
         if existing:
             conn.execute("""
-                UPDATE RosterMembership SET status = 'invited', invited_at = NOW(), left_at = NULL
+                UPDATE RosterMembership SET status = 'invited', invited_at = NOW()
                 WHERE team_id = %s AND user_id = %s
             """, (team_id, player["user_id"]))
         else:
@@ -360,10 +361,11 @@ def accept_invite(team_id: int, user: AuthenticatedUser):
         conn.execute("SELECT 1 FROM Users WHERE user_id = %s FOR UPDATE", (user["user_id"],))
         if reason := ineligible_reason(conn, user["user_id"], team["league_id"]):
             raise HTTPException(409, reason)
-        conn.execute("""
+        if not conn.execute("""
             UPDATE RosterMembership SET status = 'active', joined_at = NOW(), left_at = NULL
-            WHERE team_id = %s AND user_id = %s
-        """, (team_id, user["user_id"]))
+            WHERE team_id = %s AND user_id = %s AND status = 'invited'
+        """, (team_id, user["user_id"])).rowcount:
+            raise HTTPException(404, "You don't have a pending invite to this team.")
         conn.execute("""
             UPDATE RosterMembership SET status = 'declined'
             WHERE user_id = %s AND status = 'invited'

@@ -1,4 +1,5 @@
 # Integration tests use a disposable PostgreSQL schema; existing application data is untouched.
+import threading
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ TEST_SCHEMA = "hokie_rec_test_" + uuid.uuid4().hex
 database.DATABASE_URL = make_conninfo(BASE_URL, options=f"-c search_path={TEST_SCHEMA}")
 DATABASE_URL = database.DATABASE_URL
 
+import main
 from main import app
 from auth import COOKIE_NAME, password_hasher, token_hash
 
@@ -309,8 +311,8 @@ class RosterTest(RosterCase):
         sql("UPDATE Users SET suspended_until = CURRENT_DATE + 3 WHERE user_id = %s", (self.other,))
         self.addCleanup(sql, "UPDATE Users SET suspended_until = %s WHERE user_id = %s", (previous, self.other))
         r = self.invite_pid(self.other)
-        self.assertEqual(r.status_code, 409)
-        self.assertTrue(r.json()["detail"].startswith("Suspended until"))
+        # Captains learn the player is suspended, never the disciplinary end date
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "Suspended players can't join teams."))
 
     def test_invite_player_active_in_league_409(self):
         self.register(name=self.name + "b", user_id=self.other)  # other captains another team in this league
@@ -398,6 +400,37 @@ class RosterTest(RosterCase):
         self.invite_pid(self.other)
         self.assertEqual(client.delete(f"/api/teams/{self.team_id}/invites/{self.other}").status_code, 204)
         self.assertEqual(self.status_of(self.other), "removed")
+
+    def test_withdraw_reinvite_keeps_left_date(self):
+        sql("INSERT INTO RosterMembership (team_id, user_id, status, invited_at, joined_at, left_at) "
+            "VALUES (%s, %s, 'left', NOW(), NOW() - INTERVAL '30 days', '2026-10-01 12:00+00')", (self.team_id, self.other))
+        self.invite_pid(self.other)
+        client.delete(f"/api/teams/{self.team_id}/invites/{self.other}")
+        self.assertEqual(str(sql("SELECT left_at::date FROM RosterMembership WHERE team_id = %s AND user_id = %s",
+                                 (self.team_id, self.other))[0][0]), "2026-10-01")
+
+    def test_withdraw_during_accept_never_reports_false_join(self):
+        # Pause accept right after its invite check, then withdraw; the outcome must be consistent either way
+        self.invite_pid(self.other)
+        checked, withdrawn = threading.Event(), threading.Event()
+        real = main.ineligible_reason
+
+        def paused(*args):
+            checked.set()
+            withdrawn.wait(1)
+            return real(*args)
+
+        player, captain = client_for(self.other), client_for(self.captain)
+        with patch.object(main, "ineligible_reason", paused), ThreadPoolExecutor(2) as pool:
+            accept = pool.submit(player.post, f"/api/teams/{self.team_id}/invite/accept")
+            checked.wait(5)
+            withdraw = pool.submit(lambda: (captain.delete(f"/api/teams/{self.team_id}/invites/{self.other}"), withdrawn.set()))
+            accept_code, withdraw_code = accept.result().status_code, withdraw.result()[0].status_code
+        status = self.status_of(self.other)
+        if accept_code == 204:
+            self.assertEqual((status, withdraw_code), ("active", 404))
+        else:
+            self.assertEqual((accept_code, withdraw_code, status), (404, 204, None))
 
     def test_concurrent_accepts_fill_last_spot_once(self):
         self.invite_pid(self.other)

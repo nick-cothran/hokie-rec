@@ -24,7 +24,7 @@ From the Phase II/III docs:
 Agreed with the user in this design session:
 - R10. Captains invite by the player's VT PID. No user search.
 - R11. `max_roster_size` counts active members only. Captains may over-invite; accepting fails once the team is full.
-- R12. Invite-time eligibility: the captain learns at once if the PID is unknown, not an active player, suspended, already invited or active on this team, or already active on another team in this league.
+- R12. Invite-time eligibility: the captain learns at once if the PID is unknown, not an active player, suspended (never the suspension end date), already invited or active on this team, or already active on another team in this league.
 - R13. Accepting an invite auto-declines the player's other pending invites in the same league.
 - R14. Players see all their pending invites in one panel on the Teams page.
 - R15. Roster changes (invite, accept, remove, leave) are blocked from the roster lock date on. Decline and withdraw are always allowed.
@@ -67,10 +67,10 @@ All write endpoints require sign-in (`AuthenticatedUser`) and keep the existing 
 | Endpoint | Caller | Behaviour |
 |---|---|---|
 | `POST /api/teams` | active, non-suspended player | Existing, plus R1 and R7 checks |
-| `POST /api/teams/{id}/invites` `{vt_pid}` | captain | R15, R12. New row `invited`, or an existing `declined`/`removed`/`left` row reset to `invited` with `invited_at = NOW()`, `left_at = NULL` (R9). 201 → roster entry |
-| `DELETE /api/teams/{id}/invites/{player_id}` | captain | Existing. Deletes the row only if `joined_at IS NULL`; a former member's withdrawn re-invite becomes `removed` so their history stays. Allowed any time |
+| `POST /api/teams/{id}/invites` `{vt_pid}` | captain | R15, R12. New row `invited`, or an existing `declined`/`removed`/`left` row reset to `invited` with `invited_at = NOW()`; `joined_at`/`left_at` keep the previous stint (R9). 201 → roster entry |
+| `DELETE /api/teams/{id}/invites/{player_id}` | captain | Existing. Deletes the row only if `joined_at IS NULL`; a former member's withdrawn re-invite becomes `removed`, keeping `joined_at`/`left_at`. Takes the Team row lock, like accept. Allowed any time |
 | `GET /api/me/invites` | signed-in user | Own pending invites: team, league, captain name, `roster_lock_date`, active count, `max_roster_size` |
-| `POST /api/teams/{id}/invite/accept` | the invitee | R15, team not full (R11), invitee still eligible (R12), then `active`, `joined_at = NOW()`, and R13 |
+| `POST /api/teams/{id}/invite/accept` | the invitee | R15, team not full (R11), invitee still eligible (R12), then `active`, `joined_at = NOW()`, `left_at = NULL` (only while still `invited`), and R13 |
 | `POST /api/teams/{id}/invite/decline` | the invitee | `declined`. Allowed any time |
 | `DELETE /api/teams/{id}/members/{player_id}` | captain | R15. Active non-captain only → `removed`, `left_at = NOW()` |
 | `POST /api/teams/{id}/leave` | active member who isn't captain | R4/R15 → `left`, `left_at = NOW()`. Captain gets 409 "Hand off captaincy first." |
@@ -109,6 +109,8 @@ Docs: README API table rewritten (audit finding 2) and setup steps updated for `
 
 - Open decision: how should the demo work on dates when every seeded league is closed? On 2026-11-09 Fall 2026 is past its lock date (Aug 29) and Spring 2027 registration opens 2026-12-01, so with these rules nothing can be registered or changed in the seeded data until Dec 1. Options: (a) shift `seed.sql` dates (shared change, affects the whole team), (b) a dev-only "current date" override (new config), (c) document a one-line SQL to open a Spring league locally. Interim behavior: rules are enforced exactly as written; the README documents option (c) for local demos; no shared data changes.
 - Open decision: may an administrator reassign a captain (Phase II admin privilege)? Options: add an admin path to the hand-off endpoint now, or later with the admin UI. Interim behavior: only the current captain may hand off; no admin path.
+
+- Open decision: what history should a former member's withdrawn re-invite keep? Options: (a) mark it `removed` and keep the original `joined_at`/`left_at` dates, (b) add a column so the previous status (`left`, `removed`) can be restored, (c) keep stints as separate rows (changes the Phase III re-invite rule). Interim behavior: (a); the dates are preserved, the earlier status word becomes `removed`.
 
 ## Rulings (implementation choices)
 
