@@ -19,6 +19,7 @@ function Header() {
         <NavLink to="/leagues">Leagues</NavLink>
         <NavLink to="/teams">Teams</NavLink>
         <NavLink to="/schedule">Schedule</NavLink>
+        <NavLink to="/reports">Reports</NavLink>
         <NavLink to="/resources">Resources</NavLink>
       </nav>
 

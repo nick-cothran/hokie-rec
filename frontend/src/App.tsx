@@ -8,6 +8,7 @@ import Teams from './components/Teams'
 import TeamDetail from './components/TeamDetail'
 import RegisterTeam from './components/RegisterTeam'
 import Schedule from './components/Schedule'
+import Reports from './components/Reports'
 import Resources from './components/Resources'
 import SignIn from './components/SignIn'
 import SignUp from './components/SignUp'
@@ -29,6 +30,7 @@ function App() {
             <Route path="/teams/new" element={<RegisterTeam />} />
             <Route path="/teams/:teamId" element={<TeamDetail />} />
             <Route path="/schedule" element={<Schedule />} />
+            <Route path="/reports" element={<Reports />} />
             <Route path="/resources" element={<Resources />} />
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/sign-up" element={<SignUp />} />
