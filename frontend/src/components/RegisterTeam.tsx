@@ -57,7 +57,7 @@ function RegisterTeam() {
               {terms.map(term => (
                 <optgroup key={term} label={term}>
                   {leagues.data?.filter(l => l.term === term).map(l => (
-                    <option key={l.league_id} value={l.league_id}>{l.league_name} ({l.skill_level})</option>
+                    <option key={l.league_id} value={l.league_id}>{l.league_name}</option>
                   ))}
                 </optgroup>
               ))}

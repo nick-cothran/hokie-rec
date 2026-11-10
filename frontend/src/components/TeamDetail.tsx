@@ -1,7 +1,7 @@
 import '../styles/TeamDetail.css'
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { api, useApi, type RosterEntry, type Team } from '../api'
+import { api, formatDate, useApi, type RosterEntry, type Team } from '../api'
 import { fullName, useAuth } from '../auth'
 
 // S3: the captain renames the team. Keyed on the saved name so it reloads current values after a save.
@@ -40,6 +40,78 @@ function RenameForm({ team, onSaved }: { team: Team; onSaved: (message: string) 
   )
 }
 
+// The captain invites a player by their VT PID
+function InviteForm({ team, onSaved }: { team: Team; onSaved: (message: string) => void }) {
+  const [pid, setPid] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const invited = await api<RosterEntry>(`/api/teams/${team.team_id}/invites`, {
+        method: 'POST',
+        body: JSON.stringify({ vt_pid: pid }),
+      })
+      setPid('')
+      onSaved(`Invited ${fullName(invited)}.`)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+    setSaving(false)
+  }
+
+  return (
+    <form className="form-stack" onSubmit={handleSubmit}>
+      <div className="form-row">
+        <label className="field">Invite a player by PID
+          <input value={pid} onChange={e => setPid(e.target.value)} maxLength={40} required placeholder="e.g. simvt0042" disabled={team.roster_locked} />
+        </label>
+        <button className="button button-primary" type="submit" disabled={saving || team.roster_locked || !pid.trim()}>{saving ? 'Inviting…' : 'Send invite'}</button>
+      </div>
+      {error && <p className="notice notice-error" role="alert">{error}</p>}
+    </form>
+  )
+}
+
+// The captain hands captaincy to another active member
+function HandOffForm({ team, onSaved }: { team: Team; onSaved: (message: string) => void }) {
+  const members = team.roster.filter(m => m.status === 'active' && m.user_id !== team.captain_id)
+  const [userId, setUserId] = useState('')
+  const [error, setError] = useState('')
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const member = members.find(m => m.user_id === Number(userId))
+    if (!member || !window.confirm(`Make ${fullName(member)} the captain of ${team.team_name}?\n\nYou'll stay on the roster as a regular member.`)) return
+    setError('')
+    try {
+      await api(`/api/teams/${team.team_id}/captain`, { method: 'PUT', body: JSON.stringify({ user_id: member.user_id }) })
+      onSaved(`${fullName(member)} is now the captain.`)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  if (members.length === 0) return <p>Hand off captaincy: no other active members yet.</p>
+  return (
+    <form className="form-stack" onSubmit={handleSubmit}>
+      <div className="form-row">
+        <label className="field">Hand off captaincy
+          <select value={userId} onChange={e => setUserId(e.target.value)} required>
+            <option value="">Choose an active member</option>
+            {members.map(m => <option key={m.user_id} value={m.user_id}>{fullName(m)}</option>)}
+          </select>
+        </label>
+        <button className="button button-outline" type="submit" disabled={!userId}>Make captain</button>
+      </div>
+      {error && <p className="notice notice-error" role="alert">{error}</p>}
+    </form>
+  )
+}
+
 function TeamDetail() {
   const { teamId } = useParams()
   const location = useLocation()
@@ -68,6 +140,8 @@ function TeamDetail() {
 
   const captain = team?.roster.find(m => m.user_id === team.captain_id)
   const isCaptain = !!team && user?.user_id === team.captain_id
+  const mine = team?.roster.find(m => m.user_id === user?.user_id)
+  const activeCount = team?.roster.filter(m => m.status === 'active').length ?? 0
 
   function saved(message: string) {
     setNotice(message)
@@ -75,17 +149,29 @@ function TeamDetail() {
     reload()
   }
 
-  // S4: withdraw a pending invite, after the user confirms
-  async function withdraw(member: RosterEntry) {
-    if (!team || !user) return
-    if (!window.confirm(`Withdraw ${fullName(member)}'s invite to ${team.team_name}?\n\nThis removes the pending invite. It can't be undone.`)) return
+  // Runs a roster action after an optional confirm, then reloads the team
+  async function run(path: string, method: string, success: string, confirmText?: string) {
+    if (confirmText && !window.confirm(confirmText)) return
     try {
-      await api(`/api/teams/${team.team_id}/invites/${member.user_id}`, { method: 'DELETE' })
-      saved(`Withdrew ${fullName(member)}'s invite.`)
+      await api(path, { method })
+      saved(success)
     } catch (e) {
       setNotice('')
       setActionError((e as Error).message)
     }
+  }
+
+  // S4: withdraw a pending invite
+  function withdraw(member: RosterEntry) {
+    if (!team) return
+    run(`/api/teams/${team.team_id}/invites/${member.user_id}`, 'DELETE', `Withdrew ${fullName(member)}'s invite.`,
+      `Withdraw ${fullName(member)}'s invite to ${team.team_name}?`)
+  }
+
+  function remove(member: RosterEntry) {
+    if (!team) return
+    run(`/api/teams/${team.team_id}/members/${member.user_id}`, 'DELETE', `Removed ${fullName(member)} from the roster.`,
+      `Remove ${fullName(member)} from ${team.team_name}?\n\nThey'll stay in the roster history as removed. You can invite them again before the roster locks.`)
   }
 
   // Delete the team after the user confirms. Roster rows cascade; the DB blocks teams that have games.
@@ -116,21 +202,47 @@ function TeamDetail() {
             <ul className="meta-list">
               <li>Captain <strong>{captain ? fullName(captain) : `User #${team.captain_id}`}</strong></li>
               <li>Status <strong>{team.status}</strong></li>
-              <li>Active members <strong>{team.roster.filter(m => m.status === 'active').length}</strong></li>
+              <li>Roster <strong>{activeCount} / {team.max_roster_size}</strong> (min {team.min_roster_size})</li>
+              <li>{team.roster_locked ? <strong>Roster locked</strong> : <>Roster locks <strong>{formatDate(team.roster_lock_date)}</strong></>}</li>
             </ul>
           </div>
 
           {notice && <p className="notice notice-success" role="status">{notice}</p>}
           {actionError && <p className="notice notice-error" role="alert">{actionError}</p>}
 
+          {mine?.status === 'invited' && (
+            <section className="panel">
+              <h2>You're invited</h2>
+              <p>{captain ? `${fullName(captain)} invited you` : 'You were invited'} to join {team.team_name}.{team.roster_locked ? ' The roster is locked, so you can only decline.' : ''}</p>
+              <div className="form-row">
+                <button className="button button-primary" type="button" disabled={team.roster_locked || activeCount >= team.max_roster_size}
+                  onClick={() => run(`/api/teams/${team.team_id}/invite/accept`, 'POST', `You joined ${team.team_name}.`)}>Accept</button>
+                <button className="button button-outline" type="button"
+                  onClick={() => run(`/api/teams/${team.team_id}/invite/decline`, 'POST', 'Invite declined.')}>Decline</button>
+              </div>
+            </section>
+          )}
+
           <section className="panel">
             <h2>Manage team</h2>
             {isCaptain ? (
-              <RenameForm key={team.team_name} team={team} onSaved={saved} />
+              <div className="stack">
+                <RenameForm key={team.team_name} team={team} onSaved={saved} />
+                {team.roster_locked && <p className="notice notice-info">The roster locked on {formatDate(team.roster_lock_date)}. You can still rename the team, withdraw invites and hand off captaincy.</p>}
+                <InviteForm team={team} onSaved={saved} />
+                <HandOffForm key={team.captain_id} team={team} onSaved={saved} />
+              </div>
             ) : (
               <>
-                <p>Only the captain{captain ? `, ${fullName(captain)},` : ''} can rename this team or withdraw invites.{user ? ` You're signed in as ${fullName(user)}.` : ''}</p>
+                <p>Only the captain{captain ? `, ${fullName(captain)},` : ''} can rename this team or manage its roster.{user ? ` You're signed in as ${fullName(user)}.` : ''}</p>
                 {!user && <Link className="button button-outline" to={`/sign-in?next=/teams/${team.team_id}`}>Sign in</Link>}
+                {mine?.status === 'active' && (
+                  <button className="button button-danger" type="button" disabled={team.roster_locked}
+                    onClick={() => run(`/api/teams/${team.team_id}/leave`, 'POST', `You left ${team.team_name}.`,
+                      `Leave ${team.team_name}?\n\nThe captain can invite you back before the roster locks.`)}>
+                    {team.roster_locked ? 'Roster locked' : 'Leave team'}
+                  </button>
+                )}
               </>
             )}
           </section>
@@ -154,6 +266,9 @@ function TeamDetail() {
                         <td className="num">
                           {m.status === 'invited' && (
                             <button className="button button-outline button-small" type="button" onClick={() => withdraw(m)}>Withdraw invite</button>
+                          )}
+                          {m.status === 'active' && m.user_id !== team.captain_id && (
+                            <button className="button button-danger button-small" type="button" disabled={team.roster_locked} onClick={() => remove(m)}>Remove</button>
                           )}
                         </td>
                       )}

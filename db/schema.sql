@@ -1,7 +1,17 @@
+-- Phase III normalized schema. Roster limits are a rule of the sport; a league's display
+-- name is built in LeagueView (db/phase3.sql), which also holds the triggers for cross-table rules.
+CREATE TABLE Sport (
+    sport_id            INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sport_name          VARCHAR(50) NOT NULL UNIQUE,
+    min_roster_size     INT NOT NULL,
+    max_roster_size     INT NOT NULL,
+    CHECK (min_roster_size <= max_roster_size),
+    CHECK (min_roster_size >= 0)
+);
+
 CREATE TABLE League (
     league_id           INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    league_name         VARCHAR(100) NOT NULL,
-    sport_name          VARCHAR(50) NOT NULL,
+    sport_id            INT NOT NULL REFERENCES Sport(sport_id) ON DELETE RESTRICT,
     category            VARCHAR(10) NOT NULL,
     skill_level         VARCHAR(20) NOT NULL,
     term                VARCHAR(20) NOT NULL,
@@ -10,12 +20,9 @@ CREATE TABLE League (
     reg_open_at         TIMESTAMPTZ NOT NULL,
     reg_close_at        TIMESTAMPTZ NOT NULL,
     roster_lock_date    DATE NOT NULL,
-    min_roster_size     INT NOT NULL,
-    max_roster_size     INT NOT NULL,
+    UNIQUE (sport_id, category, skill_level, term),
     CHECK (reg_open_at < reg_close_at),
-    CHECK (min_roster_size <= max_roster_size),
-    CHECK (start_date <= end_date),
-    CHECK (min_roster_size >= 0)
+    CHECK (start_date <= end_date)
 );
 
 CREATE TABLE Users (
@@ -24,7 +31,7 @@ CREATE TABLE Users (
     first_name          VARCHAR(50) NOT NULL,
     last_name           VARCHAR(50) NOT NULL,
     email               VARCHAR(100) NOT NULL UNIQUE,
-    phone               VARCHAR(20) NOT NULL,
+    phone               VARCHAR(20),
     role                VARCHAR(10) NOT NULL,
     suspended_until     DATE NULL,
     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
@@ -69,7 +76,6 @@ CREATE TABLE Game (
     next_game_id        INT REFERENCES Game(game_id) ON DELETE SET NULL,
     start_time          TIMESTAMPTZ NOT NULL,
     end_time            TIMESTAMPTZ NOT NULL,
-    game_type           VARCHAR(10) NOT NULL,
     playoff_round       INT NULL,
     status              VARCHAR(10) NOT NULL DEFAULT 'scheduled',
     UNIQUE (facility_id, start_time),
@@ -84,7 +90,6 @@ CREATE TABLE ScoreReport (
     forfeit_team_id     INT REFERENCES Team(team_id) ON DELETE RESTRICT,
     home_score          INT,
     away_score          INT,
-    is_forfeit          BOOLEAN NOT NULL DEFAULT FALSE,
     submitted_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (home_score >= 0 AND away_score >= 0)
 );
@@ -110,27 +115,4 @@ CREATE TABLE IncidentReport (
     description         TEXT NOT NULL,
     status              VARCHAR(15) NOT NULL DEFAULT 'open',
     filed_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
--- Additive and rerunnable: preserves all existing people and sports data.
--- Enforce normalized uniqueness in the database, including concurrent sign-ups.
-CREATE UNIQUE INDEX IF NOT EXISTS users_vt_pid_lower_key ON Users (LOWER(vt_pid));
-CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_key ON Users (LOWER(email));
-
-CREATE TABLE IF NOT EXISTS UserCredentials (
-    user_id INT PRIMARY KEY REFERENCES Users(user_id) ON DELETE CASCADE,
-    password_hash TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS AuthSession (
-    token_hash CHAR(64) PRIMARY KEY,
-    user_id INT NOT NULL REFERENCES Users(user_id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL
-);
-CREATE INDEX IF NOT EXISTS authsession_user_id_idx ON AuthSession(user_id);
-CREATE INDEX IF NOT EXISTS authsession_expires_at_idx ON AuthSession(expires_at);
-
-CREATE TABLE IF NOT EXISTS AuthLoginAttempt (
-    identifier_hash CHAR(64) PRIMARY KEY,
-    attempts INT NOT NULL,
-    window_start TIMESTAMPTZ NOT NULL
 );

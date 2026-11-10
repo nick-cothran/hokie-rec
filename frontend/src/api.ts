@@ -49,7 +49,31 @@ export type Team = {
   captain_id: number
   league_id: number
   league_name: string
+  min_roster_size: number
+  max_roster_size: number
+  roster_lock_date: string
+  roster_locked: boolean
   roster: RosterEntry[]
+}
+
+// One of the signed-in player's pending invites (GET /api/me/invites)
+export type Invite = {
+  team_id: number
+  team_name: string
+  league_id: number
+  league_name: string
+  captain_first_name: string
+  captain_last_name: string
+  roster_lock_date: string
+  roster_locked: boolean
+  active_count: number
+  max_roster_size: number
+}
+
+// "2027-01-24" → "Jan 24, 2027", read as a calendar date (no time zone shift)
+export function formatDate(iso: string) {
+  const [year, month, day] = iso.split('-').map(Number)
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 type ValidationIssue = { loc?: (string | number)[]; msg: string }
