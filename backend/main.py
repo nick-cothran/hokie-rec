@@ -432,6 +432,33 @@ def hand_off_captaincy(team_id: int, body: NewCaptain, user: AuthenticatedUser):
                             (body.user_id, team_id)).fetchone()
 
 
+# A game with its league, place, teams (null for an undecided playoff game) and latest score; alias g
+GAME_COLUMNS = """
+    g.game_id, g.league_id, l.league_name, g.start_time, g.end_time, f.facility_name, f.location,
+    g.home_team_id, h.team_name AS home_team_name, g.away_team_id, a.team_name AS away_team_name,
+    g.playoff_round, g.next_game_id, g.status, s.home_score, s.away_score, s.forfeit_team_id
+"""
+GAME_JOINS = """
+    JOIN LeagueView l ON l.league_id = g.league_id
+    JOIN Facility f ON f.facility_id = g.facility_id
+    LEFT JOIN Team h ON h.team_id = g.home_team_id
+    LEFT JOIN Team a ON a.team_id = g.away_team_id
+    LEFT JOIN LatestScoreReport s ON s.game_id = g.game_id
+"""
+
+
+# Schedule and results, by league or team
+@app.get("/api/games")
+def list_games(league_id: int | None = None, team_id: int | None = None):
+    with db() as conn:
+        return conn.execute(f"""
+            SELECT {GAME_COLUMNS} FROM Game g {GAME_JOINS}
+            WHERE (%(league_id)s::int IS NULL OR g.league_id = %(league_id)s)
+              AND (%(team_id)s::int IS NULL OR %(team_id)s IN (g.home_team_id, g.away_team_id))
+            ORDER BY g.start_time, g.game_id
+        """, {"league_id": league_id, "team_id": team_id}).fetchall()
+
+
 # Report 1: regular-season standings from each game's latest score report (LatestScoreReport view); a forfeit is a loss for the forfeiting team
 @app.get("/api/reports/standings")
 def standings(league_id: int):

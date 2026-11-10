@@ -543,6 +543,48 @@ class CaptainActionTest(RosterCase):
         self.assertEqual(self.status_of(self.captain), "left")
 
 
+class GamesTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+
+    def test_games_filter_by_league(self):
+        league_id, n = sql("SELECT league_id, COUNT(*) FROM Game GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 1")[0]
+        games = client.get(f"/api/games?league_id={league_id}").json()
+        self.assertEqual(len(games), n)
+        self.assertTrue(all(g["league_id"] == league_id for g in games))
+        self.assertEqual([g["start_time"] for g in games], sorted(g["start_time"] for g in games))
+
+    def test_games_filter_by_team_either_side(self):
+        team_id = sql("SELECT home_team_id FROM Game WHERE home_team_id IS NOT NULL LIMIT 1")[0][0]
+        n = sql("SELECT COUNT(*) FROM Game WHERE %s IN (home_team_id, away_team_id)", (team_id,))[0][0]
+        games = client.get(f"/api/games?team_id={team_id}").json()
+        self.assertEqual(len(games), n)
+        self.assertTrue(all(team_id in (g["home_team_id"], g["away_team_id"]) for g in games))
+        self.assertTrue(any(g["away_team_id"] == team_id for g in games))
+
+    def test_games_show_latest_score(self):
+        game_id, official = sql("""
+            SELECT g.game_id, oa.official_id FROM Game g JOIN OfficiatingAssignment oa ON oa.game_id = g.game_id
+            WHERE g.status = 'completed' AND oa.status <> 'declined' ORDER BY g.game_id LIMIT 1""")[0]
+        report_id = sql("""INSERT INTO ScoreReport (game_id, submitted_by, home_score, away_score, submitted_at)
+                           VALUES (%s, %s, 9, 8, NOW() + INTERVAL '1 day') RETURNING report_id""", (game_id, official))[0][0]
+        self.addCleanup(sql, "DELETE FROM ScoreReport WHERE report_id = %s", (report_id,))
+        league_id = sql("SELECT league_id FROM Game WHERE game_id = %s", (game_id,))[0][0]
+        game = next(g for g in client.get(f"/api/games?league_id={league_id}").json() if g["game_id"] == game_id)
+        self.assertEqual((game["home_score"], game["away_score"]), (9, 8))
+
+    def test_games_forfeit_row(self):
+        game_id, forfeit = sql("SELECT game_id, forfeit_team_id FROM LatestScoreReport WHERE forfeit_team_id IS NOT NULL LIMIT 1")[0]
+        game = next(g for g in client.get(f"/api/games?team_id={forfeit}").json() if g["game_id"] == game_id)
+        self.assertEqual(game["forfeit_team_id"], forfeit)
+
+    def test_undecided_playoff_game_has_null_teams(self):
+        game_id, league_id = sql("SELECT game_id, league_id FROM Game WHERE home_team_id IS NULL LIMIT 1")[0]
+        game = next(g for g in client.get(f"/api/games?league_id={league_id}").json() if g["game_id"] == game_id)
+        self.assertIsNone(game["home_team_name"])
+        self.assertIsNotNone(game["playoff_round"])
+
+
 class TriggerTest(unittest.TestCase):
     def test_captain_cannot_lose_active_row(self):
         team_id, captain = sql("SELECT team_id, captain_id FROM Team ORDER BY team_id LIMIT 1")[0]
