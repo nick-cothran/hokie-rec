@@ -155,14 +155,6 @@ def require_unlocked(team: dict):
         raise HTTPException(409, f"The roster is locked (lock date {fmt_date(team['roster_lock_date'])}).")
 
 
-def require_captain(conn, team_id, user_id):
-    team = conn.execute("SELECT captain_id FROM Team WHERE team_id = %s", (team_id,)).fetchone()
-    if team is None:
-        raise HTTPException(404, "Team not found.")
-    if team["captain_id"] != user_id:
-        raise HTTPException(403, "Only the team captain can do that.")
-
-
 @app.get("/api/health")
 def health():
     with db() as conn:
@@ -261,7 +253,7 @@ def get_team(team_id: int):
 @app.patch("/api/teams/{team_id}")
 def rename_team(team_id: int, body: TeamRename, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user["user_id"])
+        require_team_captain(team_rules(conn, team_id), user)
         return conn.execute(
             "UPDATE Team SET team_name = %s WHERE team_id = %s RETURNING team_id, team_name",
             (body.team_name, team_id),
@@ -272,7 +264,7 @@ def rename_team(team_id: int, body: TeamRename, user: AuthenticatedUser):
 @app.delete("/api/teams/{team_id}", status_code=204)
 def delete_team(team_id: int, user: AuthenticatedUser):
     with db() as conn:
-        require_captain(conn, team_id, user["user_id"])
+        require_team_captain(team_rules(conn, team_id), user)
         conn.execute("DELETE FROM Team WHERE team_id = %s", (team_id,))
 
 
