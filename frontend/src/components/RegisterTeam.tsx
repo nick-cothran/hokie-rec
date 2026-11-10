@@ -1,13 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, useApi, type League } from '../api'
-import { fullName, useActingUser } from '../actingUser'
+import { fullName, useAuth } from '../auth'
 
-// S2: register a team; the acting user becomes its captain
+// S2: register a team; the signed-in player becomes its captain
 function RegisterTeam() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
-  const { user } = useActingUser()
+  const { user, loading } = useAuth()
   const leagues = useApi<League[]>('/api/leagues')
 
   const [leagueId, setLeagueId] = useState(params.get('league') ?? '')
@@ -19,13 +19,13 @@ function RegisterTeam() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!user) return
+    if (!user || user.role !== 'player' || loading || saving) return
     setSaving(true)
     setError('')
     try {
       const team = await api<{ team_id: number }>('/api/teams', {
         method: 'POST',
-        body: JSON.stringify({ league_id: Number(leagueId), team_name: teamName, user_id: user.user_id }),
+        body: JSON.stringify({ league_id: Number(leagueId), team_name: teamName }),
       })
       navigate(`/teams/${team.team_id}`, { state: { notice: `“${teamName.trim()}” is registered, with you as captain.` } })
     } catch (e) {
@@ -46,10 +46,10 @@ function RegisterTeam() {
       <section className="panel">
         <form className="form-stack" onSubmit={handleSubmit}>
           {!user && (
-            <p className="notice notice-info"><Link to="/sign-in">Choose who you're acting as</Link> before registering a team.</p>
+            <p className="notice notice-info"><Link to={`/sign-in?next=${encodeURIComponent('/teams/new' + (params.size ? '?' + params.toString() : ''))}`}>Sign in</Link> before registering a team.</p>
           )}
           {user && user.role !== 'player' && (
-            <p className="notice notice-info">You're acting as {fullName(user)}, who is {user.role === 'admin' ? 'an' : 'a'} {user.role}. Only players can register teams.</p>
+            <p className="notice notice-info">You're signed in as {fullName(user)}, who is {user.role === 'admin' ? 'an' : 'a'} {user.role}. Only players can register teams.</p>
           )}
           <label className="field">League
             <select value={leagueId} onChange={e => setLeagueId(e.target.value)} required disabled={!leagues.data}>
@@ -68,12 +68,12 @@ function RegisterTeam() {
             <small>Up to 60 characters. Names must be unique within a league.</small>
           </label>
           <label className="field">Captain
-            <input value={user ? fullName(user) : 'No user chosen'} readOnly disabled />
+            <input value={user ? fullName(user) : 'Not signed in'} readOnly disabled />
           </label>
           {leagues.error && <p className="notice notice-error" role="alert">{leagues.error}</p>}
           {error && <p className="notice notice-error" role="alert">{error}</p>}
           <div className="form-row">
-            <button className="button button-primary" type="submit" disabled={!user || saving}>{saving ? 'Registering…' : 'Register team'}</button>
+            <button className="button button-primary" type="submit" disabled={loading || !user || user.role !== 'player' || saving}>{saving ? 'Registering…' : 'Register team'}</button>
             <Link className="button button-outline" to="/teams">Cancel</Link>
           </div>
         </form>

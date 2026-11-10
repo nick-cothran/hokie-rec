@@ -2,11 +2,10 @@ import '../styles/TeamDetail.css'
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, useApi, type RosterEntry, type Team } from '../api'
-import { fullName, useActingUser } from '../actingUser'
+import { fullName, useAuth } from '../auth'
 
 // S3: the captain renames the team. Keyed on the saved name so it reloads current values after a save.
 function RenameForm({ team, onSaved }: { team: Team; onSaved: (message: string) => void }) {
-  const { user } = useActingUser()
   const [name, setName] = useState(team.team_name)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -19,7 +18,7 @@ function RenameForm({ team, onSaved }: { team: Team; onSaved: (message: string) 
     try {
       const saved = await api<{ team_name: string }>(`/api/teams/${team.team_id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ team_name: name, user_id: user?.user_id }),
+        body: JSON.stringify({ team_name: name }),
       })
       onSaved(`Team renamed to “${saved.team_name}”.`)
     } catch (e) {
@@ -45,7 +44,7 @@ function TeamDetail() {
   const { teamId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, setUser } = useActingUser()
+  const { user } = useAuth()
   const id = Number(teamId)
   const valid = Number.isInteger(id) && id > 0
 
@@ -81,7 +80,7 @@ function TeamDetail() {
     if (!team || !user) return
     if (!window.confirm(`Withdraw ${fullName(member)}'s invite to ${team.team_name}?\n\nThis removes the pending invite. It can't be undone.`)) return
     try {
-      await api(`/api/teams/${team.team_id}/invites/${member.user_id}?user_id=${user.user_id}`, { method: 'DELETE' })
+      await api(`/api/teams/${team.team_id}/invites/${member.user_id}`, { method: 'DELETE' })
       saved(`Withdrew ${fullName(member)}'s invite.`)
     } catch (e) {
       setNotice('')
@@ -96,7 +95,7 @@ function TeamDetail() {
     const rosterNote = others > 0 ? ` Its ${others} other roster entr${others === 1 ? 'y' : 'ies'} will be removed too.` : ''
     if (!window.confirm(`Delete ${team.team_name}?${rosterNote}\n\nThis can't be undone.`)) return
     try {
-      await api(`/api/teams/${team.team_id}?user_id=${user.user_id}`, { method: 'DELETE' })
+      await api(`/api/teams/${team.team_id}`, { method: 'DELETE' })
       navigate(`/teams?league_id=${team.league_id}`, { state: { notice: `Deleted “${team.team_name}”.` } })
     } catch (e) {
       setNotice('')
@@ -130,12 +129,8 @@ function TeamDetail() {
               <RenameForm key={team.team_name} team={team} onSaved={saved} />
             ) : (
               <>
-                <p>Only the captain{captain ? `, ${fullName(captain)},` : ''} can rename this team or withdraw invites.{user ? ` You're acting as ${fullName(user)}.` : ''}</p>
-                {captain && (
-                  <button className="button button-outline" type="button" onClick={() => setUser({ ...captain, role: 'player' })}>
-                    Act as {fullName(captain)}
-                  </button>
-                )}
+                <p>Only the captain{captain ? `, ${fullName(captain)},` : ''} can rename this team or withdraw invites.{user ? ` You're signed in as ${fullName(user)}.` : ''}</p>
+                {!user && <Link className="button button-outline" to={`/sign-in?next=/teams/${team.team_id}`}>Sign in</Link>}
               </>
             )}
           </section>

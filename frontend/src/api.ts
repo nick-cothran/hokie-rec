@@ -6,6 +6,15 @@ export type Role = 'player' | 'official' | 'admin'
 
 export type User = { user_id: number; first_name: string; last_name: string; role: Role }
 
+export type SignUpDetails = {
+  vt_pid: string
+  first_name: string
+  last_name: string
+  email: string
+  phone: string
+  password: string
+}
+
 export type Health = { status: string; version: string; database: string; leagues: number; teams: number }
 
 export type League = {
@@ -58,13 +67,30 @@ function errorMessage(body: unknown): string | null {
   return null
 }
 
+export const SESSION_EXPIRED_EVENT = 'hokie-rec-session-expired'
+
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 // Throws an Error whose message is safe to show the user
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers)
+  if (init.body) headers.set('Content-Type', 'application/json')
+  if (!['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase())) {
+    headers.set('X-Requested-With', 'HokieRec')
+  }
   let res: Response
   try {
     res = await fetch(API_URL + path, {
       ...init,
-      headers: init.body ? { 'Content-Type': 'application/json', ...init.headers } : init.headers,
+      credentials: 'include',
+      headers,
     })
   } catch (e) {
     if (init.signal?.aborted) throw e
@@ -72,7 +98,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   const body = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(errorMessage(body) ?? `Something went wrong (HTTP ${res.status}).`)
+  if (!res.ok) {
+    // An anonymous session check is normal. A rejected write means the UI's
+    // signed-in identity is stale and must be discarded everywhere.
+    if (res.status === 401 && path !== '/api/auth/me' && path !== '/api/auth/login' && path !== '/api/auth/sign-up') {
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+    }
+    throw new ApiError(errorMessage(body) ?? `Something went wrong (HTTP ${res.status}).`, res.status)
+  }
   return body as T
 }
 

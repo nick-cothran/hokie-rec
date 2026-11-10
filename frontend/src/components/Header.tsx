@@ -1,9 +1,9 @@
 import '../styles/Header.css'
 import { Link, NavLink } from 'react-router-dom'
-import { useActingUser } from '../actingUser'
+import { useAuth } from '../auth'
 
 function Header() {
-  const { user } = useActingUser()
+  const { user, loading } = useAuth()
 
   return (
     <header className="site-header">
@@ -23,7 +23,7 @@ function Header() {
       </nav>
 
       <Link className="login-button" to="/sign-in">
-        {user ? `Acting as ${user.first_name} ${user.last_name[0]}.` : 'Choose user'}
+        {loading ? 'Checking session…' : user ? `${user.first_name} ${user.last_name[0]}. · Account` : 'Sign in'}
       </Link>
     </header>
   )

@@ -8,6 +8,11 @@
 .signin-form input { min-height: 42px; width: 100%; padding: 0.6rem 0.7rem; border: 1px solid #c6d0dc; border-radius: 3px; background: white; color: var(--ink); font: inherit; font-size: 0.9rem; }
 .signin-form input:focus { border-color: var(--orange); outline: 3px solid rgba(232, 119, 34, 0.18); }
 .signin-form .button { width: 100%; }
+.signup-fields { display: grid; gap: 1rem; min-width: 0; padding: 0; margin: 0; border: 0; }
+.signup-name-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.signup-fields small { font-weight: 400; line-height: 1.4; }
+.signup-fields:disabled { opacity: 0.7; }
+@media (max-width: 400px) { .signup-name-row { grid-template-columns: 1fr; } }
 .signin-help { font-size: 0.85rem; }
 .signin-help a { color: var(--orange-dark); font-weight: 700; }
 .form-notice { padding: 0.75rem; background: #fff5ec; color: #87410f; font-size: 0.83rem; }

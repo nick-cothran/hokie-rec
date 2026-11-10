@@ -10,22 +10,14 @@ import RegisterTeam from './components/RegisterTeam'
 import Schedule from './components/Schedule'
 import Resources from './components/Resources'
 import SignIn from './components/SignIn'
+import SignUp from './components/SignUp'
 import NotFound from './components/NotFound'
-import { useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
-import type { User } from './api'
-import { ActingUserContext, loadActingUser, saveActingUser } from './actingUser'
+import AuthProvider from './AuthProvider'
 
 function App() {
-  const [user, setUserState] = useState<User | null>(loadActingUser)
-
-  function setUser(next: User | null) {
-    setUserState(next)
-    saveActingUser(next)
-  }
-
   return (
-    <ActingUserContext value={{ user, setUser }}>
+    <AuthProvider>
       <BrowserRouter>
         <div className="app-shell">
           <Header />
@@ -39,12 +31,13 @@ function App() {
             <Route path="/schedule" element={<Schedule />} />
             <Route path="/resources" element={<Resources />} />
             <Route path="/sign-in" element={<SignIn />} />
+            <Route path="/sign-up" element={<SignUp />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <Footer />
         </div>
       </BrowserRouter>
-    </ActingUserContext>
+    </AuthProvider>
   )
 }
 
