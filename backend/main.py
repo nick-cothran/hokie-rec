@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 import os
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Annotated
 
 from database import db
@@ -90,6 +91,32 @@ class TeamRename(BaseModel):
     team_name: TeamName
 
 
+# Today on campus; roster lock dates are Blacksburg calendar dates
+LOCAL_TODAY = "(NOW() AT TIME ZONE 'America/New_York')::date"
+
+
+def fmt_date(d: date) -> str:
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def ineligible_reason(conn, user_id: int, league_id: int) -> str | None:
+    """Why this user can't be active on a team in this league, or None."""
+    row = conn.execute(f"""
+        SELECT role = 'player' AND is_active AS player,
+               CASE WHEN suspended_until >= {LOCAL_TODAY} THEN suspended_until END AS suspended_until,
+               EXISTS (SELECT 1 FROM RosterMembership r JOIN Team t ON t.team_id = r.team_id
+                       WHERE r.user_id = u.user_id AND r.status = 'active' AND t.league_id = %s) AS in_league
+        FROM Users u WHERE user_id = %s
+    """, (league_id, user_id)).fetchone()
+    if not row["player"]:
+        return "Only active players can join teams."
+    if row["suspended_until"]:
+        return f"Suspended until {fmt_date(row['suspended_until'])}."
+    if row["in_league"]:
+        return "Already on a team in this league."
+    return None
+
+
 def require_captain(conn, team_id, user_id):
     team = conn.execute("SELECT captain_id FROM Team WHERE team_id = %s", (team_id,)).fetchone()
     if team is None:
@@ -133,6 +160,14 @@ def register_team(body: NewTeam, user: AuthenticatedUser):
         """, (user["user_id"],)).fetchone()
         if not eligible:
             raise HTTPException(403, "Only active, non-suspended players can register a team.")
+        # Lock the player so two registrations at once can't both pass the league check
+        conn.execute("SELECT 1 FROM Users WHERE user_id = %s FOR UPDATE", (user["user_id"],))
+        open_now = conn.execute("SELECT NOW() BETWEEN reg_open_at AND reg_close_at AS open FROM League WHERE league_id = %s",
+                                (body.league_id,)).fetchone()
+        if open_now is not None and not open_now["open"]:  # unknown league falls through to the FK's 409
+            raise HTTPException(409, "Registration for this league is not open.")
+        if reason := ineligible_reason(conn, user["user_id"], body.league_id):
+            raise HTTPException(409, reason)
         # status and registered_at come from their column DEFAULTs ('active', NOW())
         team = conn.execute("""
             INSERT INTO Team (league_id, captain_id, team_name)

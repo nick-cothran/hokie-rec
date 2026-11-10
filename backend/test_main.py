@@ -31,6 +31,9 @@ def setUpModule():
         with psycopg.connect(DATABASE_URL) as conn:
             for name in ("schema", "auth", "roster", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
+            # The API tests use the newest league; open its registration and roster for them.
+            conn.execute("""UPDATE League SET reg_open_at = NOW() - INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '30 days',
+                            roster_lock_date = CURRENT_DATE + 30 WHERE league_id = (SELECT MAX(league_id) FROM League)""")
             conn.execute("INSERT INTO UserCredentials (user_id, password_hash) SELECT user_id, %s FROM Users",
                          (password_hasher.hash(PASSWORD),))
     except Exception:
@@ -81,6 +84,24 @@ class ApiTest(unittest.TestCase):
             sign_in(user_id)
         return client.post("/api/teams", json={
             "league_id": self.league_id, "team_name": name or self.name})
+
+    def adjust_league(self, assignments):
+        # Change the test league's rules for one test; restored afterwards
+        old = sql("SELECT reg_open_at, reg_close_at, roster_lock_date, max_roster_size FROM League WHERE league_id = %s",
+                  (self.league_id,))[0]
+        sql(f"UPDATE League SET {assignments} WHERE league_id = %s", (self.league_id,))
+        self.addCleanup(sql, "UPDATE League SET reg_open_at = %s, reg_close_at = %s, roster_lock_date = %s, "
+                             "max_roster_size = %s WHERE league_id = %s", (*old, self.league_id))
+
+    def test_s2_registration_closed_is_409(self):
+        self.adjust_league("reg_close_at = NOW() - INTERVAL '1 minute'")
+        r = self.register()
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "Registration for this league is not open."))
+
+    def test_s2_already_on_team_in_league_is_409(self):
+        self.register()
+        r = self.register(name=self.name + "b")
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "Already on a team in this league."))
 
     def test_health_reports_connection(self):
         body = client.get("/api/health").json()
@@ -411,7 +432,8 @@ class SignUpTest(unittest.TestCase):
         stored = sql("SELECT c.password_hash FROM UserCredentials c JOIN Users u USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0]
         self.assertNotEqual(stored, self.details["password"])
         self.assertTrue(password_hasher.verify(self.details["password"], stored))
-        team = client.post("/api/teams", json={"league_id": 1, "team_name": self.pid})
+        open_league = sql("SELECT MAX(league_id) FROM League")[0][0]
+        team = client.post("/api/teams", json={"league_id": open_league, "team_name": self.pid})
         self.assertEqual(team.status_code, 201)
         self.assertEqual(client.get(f"/api/teams/{team.json()['team_id']}").json()["captain_id"], response.json()["user_id"])
         client.post("/api/auth/logout")
