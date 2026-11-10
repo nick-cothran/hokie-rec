@@ -639,6 +639,12 @@ class AssignmentTest(unittest.TestCase):
         self.assertEqual(self.status(), "assigned")
         self.assertEqual(self.answer(self.o1, "accept", 999999).status_code, 404)
 
+    def test_demoted_official_cannot_answer(self):
+        sql("UPDATE Users SET role = 'player' WHERE user_id = %s", (self.o1,))
+        self.addCleanup(sql, "UPDATE Users SET role = 'official' WHERE user_id = %s", (self.o1,))
+        self.assertEqual(self.answer(self.o1, "accept").status_code, 404)
+        self.assertEqual(self.status(), "assigned")
+
     def test_answering_twice_is_409(self):
         self.answer(self.o1, "accept")
         response = self.answer(self.o1, "decline")

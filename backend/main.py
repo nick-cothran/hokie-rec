@@ -464,8 +464,11 @@ def my_assignments(user: AuthenticatedUser):
         """, (user["user_id"],)).fetchall()
 
 
-def answer_assignment(assignment_id: int, user_id: int, status: str):
+def answer_assignment(assignment_id: int, user: dict, status: str):
     """The official answers a pending assignment once, before the game starts."""
+    if user["role"] != "official":  # a demoted official keeps their rows but can't answer them
+        raise HTTPException(404, "You don't have that assignment.")
+    user_id = user["user_id"]
     with db() as conn:
         # One conditional UPDATE, so two tabs answering at once can't both win
         if conn.execute("""
@@ -487,12 +490,12 @@ def answer_assignment(assignment_id: int, user_id: int, status: str):
 
 @app.post("/api/assignments/{assignment_id}/accept", status_code=204)
 def accept_assignment(assignment_id: int, user: AuthenticatedUser):
-    answer_assignment(assignment_id, user["user_id"], "accepted")
+    answer_assignment(assignment_id, user, "accepted")
 
 
 @app.post("/api/assignments/{assignment_id}/decline", status_code=204)
 def decline_assignment(assignment_id: int, user: AuthenticatedUser):
-    answer_assignment(assignment_id, user["user_id"], "declined")
+    answer_assignment(assignment_id, user, "declined")
 
 
 # Report 1: regular-season standings from each game's latest score report (LatestScoreReport view); a forfeit is a loss for the forfeiting team
