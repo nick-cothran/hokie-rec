@@ -85,6 +85,12 @@ class NewTeam(BaseModel):
     team_name: TeamName
 
 
+class Invite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    vt_pid: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+
+
 class TeamRename(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -115,6 +121,32 @@ def ineligible_reason(conn, user_id: int, league_id: int) -> str | None:
     if row["in_league"]:
         return "Already on a team in this league."
     return None
+
+
+def team_rules(conn, team_id: int, *, for_update: bool = False) -> dict:
+    """The team with its league's roster rules. for_update serializes roster changes on this team."""
+    team = conn.execute(f"""
+        SELECT t.team_id, t.team_name, t.captain_id, t.league_id, l.min_roster_size, l.max_roster_size,
+               l.roster_lock_date, {LOCAL_TODAY} >= l.roster_lock_date AS roster_locked
+        FROM Team t JOIN League l ON l.league_id = t.league_id
+        WHERE t.team_id = %s {"FOR UPDATE OF t" if for_update else ""}
+    """, (team_id,)).fetchone()
+    if team is None:
+        raise HTTPException(404, "Team not found.")
+    # Counted after the lock so concurrent accepts see each other's commits
+    team["active_count"] = conn.execute(
+        "SELECT COUNT(*) AS n FROM RosterMembership WHERE team_id = %s AND status = 'active'", (team_id,)).fetchone()["n"]
+    return team
+
+
+def require_team_captain(team: dict, user: dict):
+    if team["captain_id"] != user["user_id"]:
+        raise HTTPException(403, "Only the team captain can do that.")
+
+
+def require_unlocked(team: dict):
+    if team["roster_locked"]:
+        raise HTTPException(409, f"The roster is locked (lock date {fmt_date(team['roster_lock_date'])}).")
 
 
 def require_captain(conn, team_id, user_id):
@@ -237,17 +269,110 @@ def delete_team(team_id: int, user: AuthenticatedUser):
         conn.execute("DELETE FROM Team WHERE team_id = %s", (team_id,))
 
 
-# S4: the captain withdraws a pending invite; active and former members keep their rows
+# S4: the captain withdraws a pending invite, any time. A former member's re-invite becomes
+# 'removed' instead of being deleted, so their roster history stays.
 @app.delete("/api/teams/{team_id}/invites/{player_id}", status_code=204)
 def withdraw_invite(team_id: int, player_id: int, user: AuthenticatedUser):
     with db() as conn:
         require_captain(conn, team_id, user["user_id"])
-        deleted = conn.execute("""
+        changed = conn.execute("""
             DELETE FROM RosterMembership
+            WHERE team_id = %s AND user_id = %s AND status = 'invited' AND joined_at IS NULL
+        """, (team_id, player_id)).rowcount or conn.execute("""
+            UPDATE RosterMembership SET status = 'removed', left_at = NOW()
             WHERE team_id = %s AND user_id = %s AND status = 'invited'
         """, (team_id, player_id)).rowcount
-    if not deleted:
+    if not changed:
         raise HTTPException(404, "No pending invite for that player on this team.")
+
+
+# The captain invites a player by PID. A former member's row is reused (UNIQUE(team_id, user_id)).
+@app.post("/api/teams/{team_id}/invites", status_code=201)
+def invite_player(team_id: int, body: Invite, user: AuthenticatedUser):
+    with db() as conn:
+        team = team_rules(conn, team_id)
+        require_team_captain(team, user)
+        require_unlocked(team)
+        player = conn.execute("SELECT user_id, first_name, last_name FROM Users WHERE LOWER(vt_pid) = %s",
+                              (body.vt_pid.lower(),)).fetchone()
+        if player is None:
+            raise HTTPException(404, "No player with that PID.")
+        existing = conn.execute("SELECT status FROM RosterMembership WHERE team_id = %s AND user_id = %s",
+                                (team_id, player["user_id"])).fetchone()
+        if existing and existing["status"] in ("invited", "active"):
+            raise HTTPException(409, "That player is already invited to or on this team.")
+        if reason := ineligible_reason(conn, player["user_id"], team["league_id"]):
+            raise HTTPException(409, reason)
+        if existing:
+            conn.execute("""
+                UPDATE RosterMembership SET status = 'invited', invited_at = NOW(), left_at = NULL
+                WHERE team_id = %s AND user_id = %s
+            """, (team_id, player["user_id"]))
+        else:
+            conn.execute("""
+                INSERT INTO RosterMembership (team_id, user_id, status, invited_at) VALUES (%s, %s, 'invited', NOW())
+            """, (team_id, player["user_id"]))
+    return {**player, "status": "invited"}
+
+
+# The signed-in user's pending invites, for the Teams page
+@app.get("/api/me/invites")
+def my_invites(user: AuthenticatedUser):
+    with db() as conn:
+        return conn.execute(f"""
+            SELECT t.team_id, t.team_name, l.league_id, l.league_name,
+                   u.first_name AS captain_first_name, u.last_name AS captain_last_name,
+                   l.roster_lock_date, {LOCAL_TODAY} >= l.roster_lock_date AS roster_locked,
+                   (SELECT COUNT(*) FROM RosterMembership a WHERE a.team_id = t.team_id AND a.status = 'active') AS active_count,
+                   l.max_roster_size
+            FROM RosterMembership r
+            JOIN Team t ON t.team_id = r.team_id
+            JOIN League l ON l.league_id = t.league_id
+            JOIN Users u ON u.user_id = t.captain_id
+            WHERE r.user_id = %s AND r.status = 'invited'
+            ORDER BY l.roster_lock_date, t.team_name
+        """, (user["user_id"],)).fetchall()
+
+
+def require_pending_invite(conn, team_id: int, user_id: int):
+    if not conn.execute("SELECT 1 FROM RosterMembership WHERE team_id = %s AND user_id = %s AND status = 'invited'",
+                        (team_id, user_id)).fetchone():
+        raise HTTPException(404, "You don't have a pending invite to this team.")
+
+
+# The invitee joins. Their other pending invites in this league are declined, since they can't join those too.
+@app.post("/api/teams/{team_id}/invite/accept", status_code=204)
+def accept_invite(team_id: int, user: AuthenticatedUser):
+    with db() as conn:
+        team = team_rules(conn, team_id, for_update=True)
+        require_pending_invite(conn, team_id, user["user_id"])
+        require_unlocked(team)
+        if team["active_count"] >= team["max_roster_size"]:
+            raise HTTPException(409, f"This team is full ({team['active_count']}/{team['max_roster_size']}).")
+        conn.execute("SELECT 1 FROM Users WHERE user_id = %s FOR UPDATE", (user["user_id"],))
+        if reason := ineligible_reason(conn, user["user_id"], team["league_id"]):
+            raise HTTPException(409, reason)
+        conn.execute("""
+            UPDATE RosterMembership SET status = 'active', joined_at = NOW(), left_at = NULL
+            WHERE team_id = %s AND user_id = %s
+        """, (team_id, user["user_id"]))
+        conn.execute("""
+            UPDATE RosterMembership SET status = 'declined'
+            WHERE user_id = %s AND status = 'invited'
+              AND team_id IN (SELECT team_id FROM Team WHERE league_id = %s AND team_id <> %s)
+        """, (user["user_id"], team["league_id"], team_id))
+
+
+# The invitee says no; allowed any time
+@app.post("/api/teams/{team_id}/invite/decline", status_code=204)
+def decline_invite(team_id: int, user: AuthenticatedUser):
+    with db() as conn:
+        declined = conn.execute("""
+            UPDATE RosterMembership SET status = 'declined'
+            WHERE team_id = %s AND user_id = %s AND status = 'invited'
+        """, (team_id, user["user_id"])).rowcount
+    if not declined:
+        raise HTTPException(404, "You don't have a pending invite to this team.")
 
 
 # Report 1: regular-season standings from the latest score report per game; a forfeit is a loss for the forfeiting team

@@ -68,7 +68,7 @@ def eligible_players(n):
         "AND (suspended_until IS NULL OR suspended_until < CURRENT_DATE) ORDER BY user_id LIMIT %s", (n,))]
 
 
-class ApiTest(unittest.TestCase):
+class TeamCase(unittest.TestCase):
     def setUp(self):
         client.cookies.clear()
         self.captain, self.other = eligible_players(2)
@@ -93,6 +93,9 @@ class ApiTest(unittest.TestCase):
         self.addCleanup(sql, "UPDATE League SET reg_open_at = %s, reg_close_at = %s, roster_lock_date = %s, "
                              "max_roster_size = %s WHERE league_id = %s", (*old, self.league_id))
 
+
+
+class ApiTest(TeamCase):
     def test_s2_registration_closed_is_409(self):
         self.adjust_league("reg_close_at = NOW() - INTERVAL '1 minute'")
         r = self.register()
@@ -241,6 +244,168 @@ class ApiTest(unittest.TestCase):
         r = client.delete(f"/api/teams/{team_id}/invites/{self.other}")
         self.assertEqual(r.status_code, 404)
         self.assertEqual(len(client.get(f"/api/teams/{team_id}").json()["roster"]), 2)
+
+
+def client_for(user_id):
+    """A separate signed-in client, for tests that need two users at once."""
+    other = TestClient(app, headers={"X-Requested-With": "HokieRec"})
+    pid = sql("SELECT vt_pid FROM Users WHERE user_id = %s", (user_id,))[0][0]
+    assert other.post("/api/auth/login", json={"vt_pid": pid, "password": PASSWORD}).status_code == 200
+    return other
+
+
+class RosterTest(TeamCase):
+    def setUp(self):
+        super().setUp()
+        self.third = eligible_players(3)[2]
+        self.team_id = self.register().json()["team_id"]
+
+    def pid(self, user_id):
+        return sql("SELECT vt_pid FROM Users WHERE user_id = %s", (user_id,))[0][0]
+
+    def invite_pid(self, user_id, team_id=None, pid=None):
+        return client.post(f"/api/teams/{team_id or self.team_id}/invites", json={"vt_pid": pid or self.pid(user_id)})
+
+    def status_of(self, user_id, team_id=None):
+        rows = sql("SELECT status FROM RosterMembership WHERE team_id = %s AND user_id = %s", (team_id or self.team_id, user_id))
+        return rows[0][0] if rows else None
+
+    def accept(self, user_id, team_id=None):
+        sign_in(user_id)
+        return client.post(f"/api/teams/{team_id or self.team_id}/invite/accept")
+
+    def test_captain_invites_by_pid(self):
+        r = self.invite_pid(self.other)
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual((r.json()["user_id"], r.json()["status"]), (self.other, "invited"))
+        self.assertEqual(self.status_of(self.other), "invited")
+
+    def test_invite_pid_is_normalized(self):
+        self.assertEqual(self.invite_pid(self.other, pid=f"  {self.pid(self.other).upper()} ").status_code, 201)
+
+    def test_invite_unknown_pid_404(self):
+        r = self.invite_pid(None, pid="nosuchpid")
+        self.assertEqual((r.status_code, r.json()["detail"]), (404, "No player with that PID."))
+
+    def test_non_captain_cannot_invite_403(self):
+        sign_in(self.other)
+        self.assertEqual(self.invite_pid(self.third).status_code, 403)
+        self.assertIsNone(self.status_of(self.third))
+
+    def test_anonymous_invite_401(self):
+        client.cookies.clear()
+        self.assertEqual(self.invite_pid(self.other).status_code, 401)
+
+    def test_invite_twice_409(self):
+        self.invite_pid(self.other)
+        r = self.invite_pid(self.other)
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "That player is already invited to or on this team."))
+
+    def test_invite_suspended_409(self):
+        previous = sql("SELECT suspended_until FROM Users WHERE user_id = %s", (self.other,))[0][0]
+        sql("UPDATE Users SET suspended_until = CURRENT_DATE + 3 WHERE user_id = %s", (self.other,))
+        self.addCleanup(sql, "UPDATE Users SET suspended_until = %s WHERE user_id = %s", (previous, self.other))
+        r = self.invite_pid(self.other)
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(r.json()["detail"].startswith("Suspended until"))
+
+    def test_invite_player_active_in_league_409(self):
+        self.register(name=self.name + "b", user_id=self.other)  # other captains another team in this league
+        sign_in(self.captain)
+        r = self.invite_pid(self.other)
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "Already on a team in this league."))
+
+    def test_invite_after_lock_409(self):
+        self.adjust_league("roster_lock_date = CURRENT_DATE - 1")
+        r = self.invite_pid(self.other)
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(r.json()["detail"].startswith("The roster is locked"))
+
+    def test_my_invites_lists_pending_only(self):
+        self.invite_pid(self.other)
+        sign_in(self.other)
+        rows = client.get("/api/me/invites").json()
+        mine = [r for r in rows if r["team_id"] == self.team_id]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]["max_roster_size"], sql("SELECT max_roster_size FROM League WHERE league_id = %s",
+                                                         (self.league_id,))[0][0])
+        self.assertEqual((mine[0]["active_count"], mine[0]["roster_locked"]), (1, False))
+        self.accept(self.other)
+        self.assertEqual([r for r in client.get("/api/me/invites").json() if r["team_id"] == self.team_id], [])
+
+    def test_my_invites_requires_sign_in(self):
+        client.cookies.clear()
+        self.assertEqual(client.get("/api/me/invites").status_code, 401)
+
+    def test_accept_makes_active_and_declines_others(self):
+        team_b = self.register(name=self.name + "b", user_id=self.third).json()["team_id"]
+        self.invite_pid(self.other, team_id=team_b)
+        sign_in(self.captain)
+        self.invite_pid(self.other)
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        self.assertEqual(self.status_of(self.other), "active")
+        self.assertEqual(self.status_of(self.other, team_b), "declined")
+        self.assertIsNotNone(sql("SELECT joined_at FROM RosterMembership WHERE team_id = %s AND user_id = %s",
+                                 (self.team_id, self.other))[0][0])
+
+    def test_accept_without_invite_404(self):
+        r = self.accept(self.other)
+        self.assertEqual((r.status_code, r.json()["detail"]), (404, "You don't have a pending invite to this team."))
+
+    def test_accept_full_team_409(self):
+        self.invite_pid(self.other)
+        self.adjust_league("max_roster_size = 1, min_roster_size = 0")
+        r = self.accept(self.other)
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "This team is full (1/1)."))
+        self.assertEqual(self.status_of(self.other), "invited")
+
+    def test_accept_after_lock_409(self):
+        self.invite_pid(self.other)
+        self.adjust_league("roster_lock_date = (NOW() AT TIME ZONE 'America/New_York')::date")  # locked on the day itself
+        self.assertEqual(self.accept(self.other).status_code, 409)
+        self.assertEqual(self.status_of(self.other), "invited")
+
+    def test_decline_after_lock_ok(self):
+        self.invite_pid(self.other)
+        self.adjust_league("roster_lock_date = CURRENT_DATE - 1")
+        sign_in(self.other)
+        self.assertEqual(client.post(f"/api/teams/{self.team_id}/invite/decline").status_code, 204)
+        self.assertEqual(self.status_of(self.other), "declined")
+
+    def test_decline_without_invite_404(self):
+        sign_in(self.other)
+        r = client.post(f"/api/teams/{self.team_id}/invite/decline")
+        self.assertEqual((r.status_code, r.json()["detail"]), (404, "You don't have a pending invite to this team."))
+
+    def test_reinvite_reuses_row(self):
+        self.invite_pid(self.other)
+        sign_in(self.other)
+        client.post(f"/api/teams/{self.team_id}/invite/decline")
+        before = sql("SELECT membership_id FROM RosterMembership WHERE team_id = %s AND user_id = %s",
+                     (self.team_id, self.other))[0][0]
+        sign_in(self.captain)
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        after = sql("SELECT membership_id, status FROM RosterMembership WHERE team_id = %s AND user_id = %s",
+                    (self.team_id, self.other))
+        self.assertEqual(after, [(before, "invited")])
+
+    def test_withdraw_reinvite_keeps_history(self):
+        sql("INSERT INTO RosterMembership (team_id, user_id, status, invited_at, joined_at, left_at) "
+            "VALUES (%s, %s, 'left', NOW(), NOW(), NOW())", (self.team_id, self.other))
+        self.invite_pid(self.other)
+        self.assertEqual(client.delete(f"/api/teams/{self.team_id}/invites/{self.other}").status_code, 204)
+        self.assertEqual(self.status_of(self.other), "removed")
+
+    def test_concurrent_accepts_fill_last_spot_once(self):
+        self.invite_pid(self.other)
+        self.invite_pid(self.third)
+        self.adjust_league("max_roster_size = 2, min_roster_size = 0")
+        clients = [client_for(self.other), client_for(self.third)]
+        with ThreadPoolExecutor(2) as pool:
+            codes = list(pool.map(lambda c: c.post(f"/api/teams/{self.team_id}/invite/accept").status_code, clients))
+        self.assertEqual(sorted(codes), [204, 409])
+        self.assertEqual(sql("SELECT COUNT(*) FROM RosterMembership WHERE team_id = %s AND status = 'active'",
+                             (self.team_id,))[0][0], 2)
 
 
 class TriggerTest(unittest.TestCase):
