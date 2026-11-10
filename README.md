@@ -18,7 +18,7 @@
    python seed_demo_accounts.py --development
    ```
 
-   `migrate.py` adds the authentication tables and roster rules to existing databases without deleting data; it is safe to rerun. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
+   `migrate.py` brings an existing database up to date (authentication tables, roster rules, and the Phase III schema in `db/phase3.sql`) without losing data; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
 
 3. From `/backend` (venv active), run `uvicorn main:app --reload`. The terminal prints the DB connection on startup.
 4. Open http://localhost:8000/docs to try every endpoint in the browser.
@@ -59,6 +59,8 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | PUT | `/api/teams/{team_id}/captain` | `{user_id}` | captain | Hand off to an active member, any time. 200 → `{team_id, captain_id}` |
 | GET | `/api/reports/standings` | `?league_id=1` | anyone | Report 1. Regular-season W/L/T and points per team; forfeit = loss for the forfeiting team. 404 if no league |
 | GET | `/api/reports/participation` | `?term=Fall 2026` (optional) | anyone | Report 2. Teams, active players, pending invites, avg roster, games played/left per league |
+
+Schema (Phase III): roster limits live on `Sport`; a league's display name (`league_name`, e.g. "Coed Soccer, Recreational, Fall 2026") and its sport's limits come from the `LeagueView` view. A game is a playoff game when `playoff_round` is set, a score report is a forfeit when `forfeit_team_id` is set, and standings use the newest report per game (`LatestScoreReport` view). Triggers in `db/phase3.sql` enforce that only the game's assigned official (not one who declined) submits a score report, reports are never edited, a forfeit names one of the game's teams, a game's teams play in its league, officials are assigned and file incidents, and admins assign officials and review incidents.
 
 Roster statuses: `invited` → `active`, `declined`, `removed` or `left`. Two database triggers (`db/roster.sql`) also enforce that a captain is always an active member of their team and that a player is active on at most one team per league.
 

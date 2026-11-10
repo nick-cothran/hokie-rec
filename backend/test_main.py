@@ -31,7 +31,7 @@ def setUpModule():
     try:
         root = Path(__file__).resolve().parents[1]
         with psycopg.connect(DATABASE_URL) as conn:
-            for name in ("schema", "auth", "roster", "seed"):
+            for name in ("schema", "auth", "roster", "phase3", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
             # The API tests use the newest league; open its registration and roster for them.
             conn.execute("""UPDATE League SET reg_open_at = NOW() - INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '30 days',
@@ -89,11 +89,19 @@ class TeamCase(unittest.TestCase):
 
     def adjust_league(self, assignments):
         # Change the test league's rules for one test; restored afterwards
-        old = sql("SELECT reg_open_at, reg_close_at, roster_lock_date, max_roster_size FROM League WHERE league_id = %s",
+        old = sql("SELECT reg_open_at, reg_close_at, roster_lock_date FROM League WHERE league_id = %s",
                   (self.league_id,))[0]
         sql(f"UPDATE League SET {assignments} WHERE league_id = %s", (self.league_id,))
-        self.addCleanup(sql, "UPDATE League SET reg_open_at = %s, reg_close_at = %s, roster_lock_date = %s, "
-                             "max_roster_size = %s WHERE league_id = %s", (*old, self.league_id))
+        self.addCleanup(sql, "UPDATE League SET reg_open_at = %s, reg_close_at = %s, roster_lock_date = %s "
+                             "WHERE league_id = %s", (*old, self.league_id))
+
+    def adjust_sport(self, assignments):
+        # Roster limits live on Sport; the test league is its sport's only league, so no other league changes
+        sport_id, *old = sql("SELECT sport_id, min_roster_size, max_roster_size FROM Sport JOIN League USING (sport_id) "
+                             "WHERE league_id = %s", (self.league_id,))[0]
+        sql(f"UPDATE Sport SET {assignments} WHERE sport_id = %s", (sport_id,))
+        self.addCleanup(sql, "UPDATE Sport SET min_roster_size = %s, max_roster_size = %s WHERE sport_id = %s",
+                        (*old, sport_id))
 
 
 
@@ -332,7 +340,7 @@ class RosterTest(RosterCase):
         rows = client.get("/api/me/invites").json()
         mine = [r for r in rows if r["team_id"] == self.team_id]
         self.assertEqual(len(mine), 1)
-        self.assertEqual(mine[0]["max_roster_size"], sql("SELECT max_roster_size FROM League WHERE league_id = %s",
+        self.assertEqual(mine[0]["max_roster_size"], sql("SELECT max_roster_size FROM LeagueView WHERE league_id = %s",
                                                          (self.league_id,))[0][0])
         self.assertEqual((mine[0]["active_count"], mine[0]["roster_locked"]), (1, False))
         self.accept(self.other)
@@ -359,7 +367,7 @@ class RosterTest(RosterCase):
 
     def test_accept_full_team_409(self):
         self.invite_pid(self.other)
-        self.adjust_league("max_roster_size = 1, min_roster_size = 0")
+        self.adjust_sport("max_roster_size = 1, min_roster_size = 0")
         r = self.accept(self.other)
         self.assertEqual((r.status_code, r.json()["detail"]), (409, "This team is full (1/1)."))
         self.assertEqual(self.status_of(self.other), "invited")
@@ -435,7 +443,7 @@ class RosterTest(RosterCase):
     def test_concurrent_accepts_fill_last_spot_once(self):
         self.invite_pid(self.other)
         self.invite_pid(self.third)
-        self.adjust_league("max_roster_size = 2, min_roster_size = 0")
+        self.adjust_sport("max_roster_size = 2, min_roster_size = 0")
         clients = [client_for(self.other), client_for(self.third)]
         with ThreadPoolExecutor(2) as pool:
             codes = list(pool.map(lambda c: c.post(f"/api/teams/{self.team_id}/invite/accept").status_code, clients))
@@ -817,7 +825,7 @@ class ReportTest(unittest.TestCase):
         # The league with the most forfeits, so the forfeit rule is exercised
         self.league_id = sql("""
             SELECT g.league_id FROM Game g JOIN ScoreReport s ON s.game_id = g.game_id
-            GROUP BY g.league_id ORDER BY COUNT(*) FILTER (WHERE s.is_forfeit) DESC, g.league_id LIMIT 1""")[0][0]
+            GROUP BY g.league_id ORDER BY COUNT(s.forfeit_team_id) DESC, g.league_id LIMIT 1""")[0][0]
 
     def test_standings_totals_add_up(self):
         r = client.get("/api/reports/standings", params={"league_id": self.league_id})
@@ -831,7 +839,7 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(sum(t["wins"] for t in rows), sum(t["losses"] for t in rows))
         reported = sql("""
             SELECT COUNT(*) FROM Game g JOIN ScoreReport s ON s.game_id = g.game_id
-            WHERE g.league_id = %s AND g.game_type = 'regular'""", (self.league_id,))[0][0]
+            WHERE g.league_id = %s AND g.playoff_round IS NULL""", (self.league_id,))[0][0]
         self.assertEqual(sum(t["played"] for t in rows), 2 * reported)
 
     def test_standings_sorted_by_wins_then_diff(self):
@@ -842,7 +850,7 @@ class ReportTest(unittest.TestCase):
     def test_standings_forfeit_is_a_loss(self):
         forfeits = sql("""
             SELECT s.forfeit_team_id, COUNT(*) FROM Game g JOIN ScoreReport s ON s.game_id = g.game_id
-            WHERE g.league_id = %s AND s.is_forfeit GROUP BY 1""", (self.league_id,))
+            WHERE g.league_id = %s AND s.forfeit_team_id IS NOT NULL GROUP BY 1""", (self.league_id,))
         if not forfeits:
             self.skipTest("no forfeits in seed data")
         rows = {t["team_id"]: t for t in client.get(
@@ -856,19 +864,18 @@ class ReportTest(unittest.TestCase):
             return sum(t["played"] for t in rows), sum(t["ties"] for t in rows)
 
         before = played()
-        game_id = sql("SELECT game_id FROM Game WHERE league_id = %s AND status = 'completed' LIMIT 1",
-                      (self.league_id,))[0][0]
-        official = sql("SELECT user_id FROM Users WHERE role = 'official' LIMIT 1")[0][0]
-        # Newer reports win, so these hide the game's real result: no scores, then a forfeit with no team
-        for forfeit in (False, True):
-            report_id = sql("""INSERT INTO ScoreReport (game_id, submitted_by, is_forfeit, submitted_at)
-                               VALUES (%s, %s, %s, NOW()) RETURNING report_id""", (game_id, official, forfeit))[0][0]
-            try:
-                after = played()
-                self.assertEqual(after[0], before[0] - 2)
-                self.assertLessEqual(after[1], before[1])
-            finally:
-                sql("DELETE FROM ScoreReport WHERE report_id = %s", (report_id,))
+        game_id, official = sql("""
+            SELECT g.game_id, oa.official_id FROM Game g JOIN OfficiatingAssignment oa ON oa.game_id = g.game_id
+            WHERE g.league_id = %s AND g.status = 'completed' LIMIT 1""", (self.league_id,))[0]
+        # A newer report wins, so one with no scores and no forfeit hides the game's real result
+        report_id = sql("""INSERT INTO ScoreReport (game_id, submitted_by, submitted_at)
+                           VALUES (%s, %s, NOW()) RETURNING report_id""", (game_id, official))[0][0]
+        try:
+            after = played()
+            self.assertEqual(after[0], before[0] - 2)
+            self.assertLessEqual(after[1], before[1])
+        finally:
+            sql("DELETE FROM ScoreReport WHERE report_id = %s", (report_id,))
 
     def test_standings_unknown_league_is_404(self):
         self.assertEqual(client.get("/api/reports/standings", params={"league_id": 999999}).status_code, 404)
@@ -889,6 +896,104 @@ class ReportTest(unittest.TestCase):
     def test_participation_without_term_lists_every_league(self):
         rows = client.get("/api/reports/participation").json()
         self.assertEqual(len(rows), len(client.get("/api/leagues").json()))
+
+
+class SchemaRulesTest(unittest.TestCase):
+    """Phase III rules the database enforces on its own."""
+
+    def setUp(self):
+        self.game_id, self.home, self.away, self.official = sql("""
+            SELECT g.game_id, g.home_team_id, g.away_team_id, oa.official_id
+            FROM Game g JOIN OfficiatingAssignment oa ON oa.game_id = g.game_id
+            WHERE g.playoff_round IS NULL ORDER BY g.game_id LIMIT 1""")[0]
+        self.player = eligible_players(1)[0]
+        self.admin = sql("SELECT user_id FROM Users WHERE role = 'admin' LIMIT 1")[0][0]
+        self.other_official = sql("""
+            SELECT user_id FROM Users WHERE role = 'official'
+              AND user_id NOT IN (SELECT official_id FROM OfficiatingAssignment WHERE game_id = %s) LIMIT 1""",
+            (self.game_id,))[0][0]
+
+    def run_sql(self, *steps):
+        # Every step runs in one transaction that is always rolled back, so nothing is left behind
+        with psycopg.connect(DATABASE_URL) as conn:
+            try:
+                for query, params in steps:
+                    conn.execute(query, params)
+            finally:
+                conn.rollback()
+
+    def assertRejected(self, constraint, *steps):
+        with self.assertRaises(psycopg.errors.IntegrityError) as caught:
+            self.run_sql(*steps)
+        self.assertEqual(caught.exception.diag.constraint_name, constraint)
+
+    def report(self, submitted_by, forfeit_team_id=None):
+        return ("INSERT INTO ScoreReport (game_id, submitted_by, forfeit_team_id, home_score, away_score) "
+                "VALUES (%s, %s, %s, 1, 0)", (self.game_id, submitted_by, forfeit_team_id))
+
+    def test_derived_columns_are_gone(self):
+        columns = {(t, c) for t, c in sql("""SELECT table_name, column_name FROM information_schema.columns
+                                             WHERE table_schema = current_schema()""")}
+        for dropped in [("league", "league_name"), ("league", "sport_name"), ("league", "min_roster_size"),
+                        ("league", "max_roster_size"), ("game", "game_type"), ("scorereport", "is_forfeit")]:
+            self.assertNotIn(dropped, columns)
+        self.assertIn(("league", "sport_id"), columns)
+
+    def test_league_name_is_built_from_its_columns(self):
+        for l in client.get("/api/leagues").json():
+            self.assertEqual(l["league_name"], f"{l['category']} {l['sport_name']}, {l['skill_level']}, {l['term']}")
+
+    def test_same_league_cannot_be_created_twice(self):
+        self.assertRejected("league_sport_id_category_skill_level_term_key", ("""
+            INSERT INTO League (sport_id, category, skill_level, term, start_date, end_date, reg_open_at,
+                                reg_close_at, roster_lock_date)
+            SELECT sport_id, category, skill_level, term, start_date, end_date, reg_open_at, reg_close_at,
+                   roster_lock_date FROM League LIMIT 1""", ()))
+
+    def test_phone_is_optional(self):
+        self.run_sql(("INSERT INTO Users (vt_pid, first_name, last_name, email, role) "
+                      "VALUES ('nophone1', 'No', 'Phone', 'nophone1@example.com', 'player')", ()))
+
+    def test_assigned_official_submits_score(self):
+        self.run_sql(self.report(self.official), self.report(self.official, self.home))
+
+    def test_only_the_assigned_official_submits_score(self):
+        for user_id in (self.player, self.admin, self.other_official):
+            with self.subTest(user_id=user_id):
+                self.assertRejected("scorereport_by_assigned_official", self.report(user_id))
+
+    def test_declined_official_cannot_submit_score(self):
+        self.assertRejected("scorereport_by_assigned_official",
+                            ("UPDATE OfficiatingAssignment SET status = 'declined' WHERE game_id = %s AND official_id = %s",
+                             (self.game_id, self.official)),
+                            self.report(self.official))
+
+    def test_forfeit_team_must_play_in_the_game(self):
+        outsider = sql("SELECT team_id FROM Team WHERE team_id NOT IN (%s, %s) LIMIT 1", (self.home, self.away))[0][0]
+        self.assertRejected("scorereport_forfeit_team_in_game", self.report(self.official, outsider))
+
+    def test_score_reports_are_never_edited(self):
+        self.assertRejected("scorereport_no_edits",
+                            ("UPDATE ScoreReport SET home_score = home_score + 1 WHERE game_id = %s", (self.game_id,)))
+
+    def test_game_teams_belong_to_its_league(self):
+        outsider = sql("SELECT team_id FROM Team WHERE league_id <> (SELECT league_id FROM Game WHERE game_id = %s) LIMIT 1",
+                       (self.game_id,))[0][0]
+        self.assertRejected("game_teams_in_league",
+                            ("UPDATE Game SET away_team_id = %s WHERE game_id = %s", (outsider, self.game_id)))
+
+    def test_assignment_roles(self):
+        assign = "INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status) VALUES (%s, %s, %s, 'referee', 'pending')"
+        self.run_sql((assign, (self.game_id, self.other_official, self.admin)))
+        self.assertRejected("assignment_official_role", (assign, (self.game_id, self.player, self.admin)))
+        self.assertRejected("assignment_by_admin", (assign, (self.game_id, self.other_official, self.official)))
+
+    def test_incident_roles(self):
+        incident = ("INSERT INTO IncidentReport (game_id, filed_by, reviewed_by, incident_type, description) "
+                    "VALUES (%s, %s, %s, 'conduct', 'Test')")
+        self.run_sql((incident, (self.game_id, self.official, self.admin)), (incident, (self.game_id, self.official, None)))
+        self.assertRejected("incident_filed_by_official", (incident, (self.game_id, self.player, None)))
+        self.assertRejected("incident_reviewed_by_admin", (incident, (self.game_id, self.official, self.official)))
 
 
 if __name__ == "__main__":

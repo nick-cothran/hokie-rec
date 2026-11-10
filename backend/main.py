@@ -134,7 +134,7 @@ def team_rules(conn, team_id: int, *, for_update: bool = False) -> dict:
     team = conn.execute(f"""
         SELECT t.team_id, t.team_name, t.captain_id, t.league_id, l.min_roster_size, l.max_roster_size,
                l.roster_lock_date, {LOCAL_TODAY} >= l.roster_lock_date AS roster_locked
-        FROM Team t JOIN League l ON l.league_id = t.league_id
+        FROM Team t JOIN LeagueView l ON l.league_id = t.league_id
         WHERE t.team_id = %s {"FOR UPDATE OF t" if for_update else ""}
     """, (team_id,)).fetchone()
     if team is None:
@@ -179,11 +179,10 @@ def list_leagues(sport: str | None = None, term: str | None = None):
     with db() as conn:
         return conn.execute("""
             SELECT l.league_id, l.league_name, l.sport_name, l.category, l.skill_level, l.term,
-                   COUNT(t.team_id) AS team_count
-            FROM League l LEFT JOIN Team t ON t.league_id = l.league_id
+                   (SELECT COUNT(*) FROM Team t WHERE t.league_id = l.league_id) AS team_count
+            FROM LeagueView l
             WHERE (%(sport)s::text IS NULL OR l.sport_name = %(sport)s)
               AND (%(term)s::text IS NULL OR l.term = %(term)s)
-            GROUP BY l.league_id
             ORDER BY l.league_name
         """, {"sport": sport, "term": term}).fetchall()
 
@@ -228,11 +227,11 @@ def list_teams(league_id: int | None = None):
                    u.first_name AS captain_first_name, u.last_name AS captain_last_name,
                    COUNT(r.membership_id) FILTER (WHERE r.status = 'active') AS member_count
             FROM Team t
-            JOIN League l ON l.league_id = t.league_id
+            JOIN LeagueView l ON l.league_id = t.league_id
             JOIN Users u ON u.user_id = t.captain_id
             LEFT JOIN RosterMembership r ON r.team_id = t.team_id
             WHERE (%(league_id)s::int IS NULL OR t.league_id = %(league_id)s)
-            GROUP BY t.team_id, l.league_id, u.user_id
+            GROUP BY t.team_id, l.league_id, l.league_name, l.sport_name, l.term, u.user_id
             ORDER BY l.league_name, t.team_name
         """, {"league_id": league_id}).fetchall()
 
@@ -244,7 +243,7 @@ def get_team(team_id: int):
             SELECT t.team_id, t.team_name, t.status, t.captain_id, l.league_id, l.league_name,
                    l.min_roster_size, l.max_roster_size, l.roster_lock_date,
                    {LOCAL_TODAY} >= l.roster_lock_date AS roster_locked
-            FROM Team t JOIN League l ON l.league_id = t.league_id
+            FROM Team t JOIN LeagueView l ON l.league_id = t.league_id
             WHERE t.team_id = %s
         """, (team_id,)).fetchone()
         if team is None:
@@ -336,7 +335,7 @@ def my_invites(user: AuthenticatedUser):
                    l.max_roster_size
             FROM RosterMembership r
             JOIN Team t ON t.team_id = r.team_id
-            JOIN League l ON l.league_id = t.league_id
+            JOIN LeagueView l ON l.league_id = t.league_id
             JOIN Users u ON u.user_id = t.captain_id
             WHERE r.user_id = %s AND r.status = 'invited'
             ORDER BY l.roster_lock_date, t.team_name
@@ -433,30 +432,28 @@ def hand_off_captaincy(team_id: int, body: NewCaptain, user: AuthenticatedUser):
                             (body.user_id, team_id)).fetchone()
 
 
-# Report 1: regular-season standings from the latest score report per game; a forfeit is a loss for the forfeiting team
+# Report 1: regular-season standings from each game's latest score report (LatestScoreReport view); a forfeit is a loss for the forfeiting team
 @app.get("/api/reports/standings")
 def standings(league_id: int):
     with db() as conn:
         if not conn.execute("SELECT 1 FROM League WHERE league_id = %s", (league_id,)).fetchone():
             raise HTTPException(404, "League not found.")
         return conn.execute("""
-            WITH latest AS (
-                SELECT DISTINCT ON (game_id) * FROM ScoreReport ORDER BY game_id, submitted_at DESC
-            ), sides AS (
-                SELECT g.home_team_id AS team_id, s.home_score AS pf, s.away_score AS pa, s.is_forfeit, s.forfeit_team_id
-                FROM Game g JOIN latest s ON s.game_id = g.game_id
-                WHERE g.league_id = %(league_id)s AND g.game_type = 'regular'
+            WITH sides AS (
+                SELECT g.home_team_id AS team_id, s.home_score AS pf, s.away_score AS pa, s.forfeit_team_id
+                FROM Game g JOIN LatestScoreReport s ON s.game_id = g.game_id
+                WHERE g.league_id = %(league_id)s AND g.playoff_round IS NULL
                 UNION ALL
-                SELECT g.away_team_id, s.away_score, s.home_score, s.is_forfeit, s.forfeit_team_id
-                FROM Game g JOIN latest s ON s.game_id = g.game_id
-                WHERE g.league_id = %(league_id)s AND g.game_type = 'regular'
+                SELECT g.away_team_id, s.away_score, s.home_score, s.forfeit_team_id
+                FROM Game g JOIN LatestScoreReport s ON s.game_id = g.game_id
+                WHERE g.league_id = %(league_id)s AND g.playoff_round IS NULL
             ), results AS (
                 SELECT team_id, pf, pa,
-                       CASE WHEN is_forfeit THEN CASE WHEN forfeit_team_id = team_id THEN 'L' ELSE 'W' END
+                       CASE WHEN forfeit_team_id IS NOT NULL THEN CASE WHEN forfeit_team_id = team_id THEN 'L' ELSE 'W' END
                             WHEN pf > pa THEN 'W' WHEN pf < pa THEN 'L' ELSE 'T' END AS result
                 FROM sides
-                -- Skip incomplete reports: a forfeit needs the forfeiting team, a played game needs both scores
-                WHERE CASE WHEN is_forfeit THEN forfeit_team_id IS NOT NULL ELSE pf IS NOT NULL AND pa IS NOT NULL END
+                -- Skip a report with no forfeit and missing scores: there's no result to count
+                WHERE forfeit_team_id IS NOT NULL OR (pf IS NOT NULL AND pa IS NOT NULL)
             )
             SELECT t.team_id, t.team_name,
                    COUNT(r.result) AS played,
@@ -486,10 +483,10 @@ def participation(term: str | None = None):
                          / NULLIF(COUNT(DISTINCT t.team_id), 0), 1)::float AS avg_roster_size,
                    (SELECT COUNT(*) FROM Game g WHERE g.league_id = l.league_id AND g.status = 'completed') AS games_played,
                    (SELECT COUNT(*) FROM Game g WHERE g.league_id = l.league_id AND g.status = 'scheduled') AS games_remaining
-            FROM League l
+            FROM LeagueView l
             LEFT JOIN Team t ON t.league_id = l.league_id
             LEFT JOIN RosterMembership r ON r.team_id = t.team_id
             WHERE (%(term)s::text IS NULL OR l.term = %(term)s)
-            GROUP BY l.league_id
+            GROUP BY l.league_id, l.league_name, l.sport_name, l.term, l.max_roster_size, l.start_date
             ORDER BY l.start_date DESC, l.league_name
         """, {"term": term}).fetchall()

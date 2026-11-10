@@ -10,6 +10,7 @@ services:
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
       - ./db/auth.sql:/docker-entrypoint-initdb.d/02_auth.sql:ro
       - ./db/roster.sql:/docker-entrypoint-initdb.d/03_roster.sql:ro
+      - ./db/phase3.sql:/docker-entrypoint-initdb.d/04_phase3.sql:ro
       - ./db/seed.sql:/seed.sql:ro
 volumes:
   postgres_data:
