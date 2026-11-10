@@ -585,6 +585,74 @@ class GamesTest(unittest.TestCase):
         self.assertIsNotNone(game["playoff_round"])
 
 
+class AssignmentTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        uid = lambda pid: sql("SELECT user_id FROM Users WHERE vt_pid = %s", (pid,))[0][0]
+        self.o1, self.o2, admin = uid("simvt0121"), uid("simvt0122"), uid("simvt0133")
+        self.game_id = sql("""
+            INSERT INTO Game (league_id, facility_id, start_time, end_time, playoff_round)
+            SELECT league_id, (SELECT MIN(facility_id) FROM Facility), NOW() + INTERVAL '7 days', NOW() + INTERVAL '7 days 1 hour', 3
+            FROM Game ORDER BY game_id LIMIT 1 RETURNING game_id""")[0][0]
+        self.addCleanup(sql, "DELETE FROM Game WHERE game_id = %s", (self.game_id,))  # assignments cascade
+        self.assignment_id = sql("""INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status)
+                                    VALUES (%s, %s, %s, 'referee', 'assigned') RETURNING assignment_id""",
+                                 (self.game_id, self.o1, admin))[0][0]
+
+    def answer(self, user_id, action, assignment_id=None):
+        sign_in(user_id)
+        return client.post(f"/api/assignments/{assignment_id or self.assignment_id}/{action}")
+
+    def status(self):
+        return sql("SELECT status FROM OfficiatingAssignment WHERE assignment_id = %s", (self.assignment_id,))[0][0]
+
+    def test_anonymous_gets_401(self):
+        self.assertEqual(client.get("/api/me/assignments").status_code, 401)
+        for action in ("accept", "decline"):
+            self.assertEqual(client.post(f"/api/assignments/{self.assignment_id}/{action}").status_code, 401)
+
+    def test_lists_only_own_assignments(self):
+        sign_in(self.o1)
+        rows = client.get("/api/me/assignments").json()
+        mine = {r[0] for r in sql("SELECT assignment_id FROM OfficiatingAssignment WHERE official_id = %s", (self.o1,))}
+        self.assertEqual({r["assignment_id"] for r in rows}, mine)
+        row = next(r for r in rows if r["assignment_id"] == self.assignment_id)
+        self.assertEqual((row["assignment_status"], row["can_respond"], row["game_id"]), ("assigned", True, self.game_id))
+        sign_in(self.o2)
+        self.assertNotIn(self.assignment_id, [r["assignment_id"] for r in client.get("/api/me/assignments").json()])
+
+    def test_player_gets_empty_list(self):
+        sign_in(eligible_players(1)[0])
+        self.assertEqual(client.get("/api/me/assignments").json(), [])
+
+    def test_accept_sets_accepted(self):
+        self.assertEqual(self.answer(self.o1, "accept").status_code, 204)
+        self.assertEqual(self.status(), "accepted")
+
+    def test_decline_sets_declined(self):
+        self.assertEqual(self.answer(self.o1, "decline").status_code, 204)
+        self.assertEqual(self.status(), "declined")
+
+    def test_other_officials_assignment_is_404(self):
+        response = self.answer(self.o2, "accept")
+        self.assertEqual((response.status_code, response.json()["detail"]), (404, "You don't have that assignment."))
+        self.assertEqual(self.status(), "assigned")
+        self.assertEqual(self.answer(self.o1, "accept", 999999).status_code, 404)
+
+    def test_answering_twice_is_409(self):
+        self.answer(self.o1, "accept")
+        response = self.answer(self.o1, "decline")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "You've already answered this assignment."))
+        self.assertEqual(self.status(), "accepted")
+
+    def test_started_game_is_409(self):
+        sql("UPDATE Game SET start_time = NOW() - INTERVAL '1 hour', end_time = NOW() WHERE game_id = %s", (self.game_id,))
+        response = self.answer(self.o1, "accept")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "This game has already started."))
+        row = next(r for r in client.get("/api/me/assignments").json() if r["assignment_id"] == self.assignment_id)
+        self.assertFalse(row["can_respond"])
+
+
 class TriggerTest(unittest.TestCase):
     def test_captain_cannot_lose_active_row(self):
         team_id, captain = sql("SELECT team_id, captain_id FROM Team ORDER BY team_id LIMIT 1")[0]

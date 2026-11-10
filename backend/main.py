@@ -459,6 +459,50 @@ def list_games(league_id: int | None = None, team_id: int | None = None):
         """, {"league_id": league_id, "team_id": team_id}).fetchall()
 
 
+# The signed-in official's assignments; anyone else has none
+@app.get("/api/me/assignments")
+def my_assignments(user: AuthenticatedUser):
+    with db() as conn:
+        return conn.execute(f"""
+            SELECT oa.assignment_id, oa.position, oa.status AS assignment_status,
+                   oa.status = 'assigned' AND g.start_time > NOW() AS can_respond, {GAME_COLUMNS}
+            FROM OfficiatingAssignment oa JOIN Game g ON g.game_id = oa.game_id {GAME_JOINS}
+            WHERE oa.official_id = %s
+            ORDER BY g.start_time, g.game_id
+        """, (user["user_id"],)).fetchall()
+
+
+def answer_assignment(assignment_id: int, user_id: int, status: str):
+    """The official answers a pending assignment once, before the game starts."""
+    with db() as conn:
+        # One conditional UPDATE, so two tabs answering at once can't both win
+        if conn.execute("""
+            UPDATE OfficiatingAssignment oa SET status = %s FROM Game g
+            WHERE g.game_id = oa.game_id AND oa.assignment_id = %s AND oa.official_id = %s
+              AND oa.status = 'assigned' AND g.start_time > NOW()
+        """, (status, assignment_id, user_id)).rowcount:
+            return
+        row = conn.execute("""
+            SELECT oa.status FROM OfficiatingAssignment oa
+            WHERE oa.assignment_id = %s AND oa.official_id = %s
+        """, (assignment_id, user_id)).fetchone()
+    if row is None:  # same answer for someone else's assignment, so ids reveal nothing
+        raise HTTPException(404, "You don't have that assignment.")
+    if row["status"] != "assigned":
+        raise HTTPException(409, "You've already answered this assignment.")
+    raise HTTPException(409, "This game has already started.")
+
+
+@app.post("/api/assignments/{assignment_id}/accept", status_code=204)
+def accept_assignment(assignment_id: int, user: AuthenticatedUser):
+    answer_assignment(assignment_id, user["user_id"], "accepted")
+
+
+@app.post("/api/assignments/{assignment_id}/decline", status_code=204)
+def decline_assignment(assignment_id: int, user: AuthenticatedUser):
+    answer_assignment(assignment_id, user["user_id"], "declined")
+
+
 # Report 1: regular-season standings from each game's latest score report (LatestScoreReport view); a forfeit is a loss for the forfeiting team
 @app.get("/api/reports/standings")
 def standings(league_id: int):
