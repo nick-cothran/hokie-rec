@@ -55,6 +55,7 @@ One conditional `UPDATE ... WHERE assignment_id = %s AND official_id = caller AN
 Every seeded pending assignment belongs to an October 2026 game that has already started, so none can be answered. README gets a snippet that moves scheduled games forward (they all start after every completed game, so a uniform shift keeps `UNIQUE(facility_id, start_time)`):
 
 ```sql
+SET timezone = 'America/New_York';  -- keeps kickoff times across the DST change
 UPDATE Game SET start_time = start_time + INTERVAL '5 weeks', end_time = end_time + INTERVAL '5 weeks' WHERE status = 'scheduled';
 ```
 

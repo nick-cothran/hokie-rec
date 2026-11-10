@@ -30,6 +30,13 @@
    UPDATE League SET reg_open_at = NOW() - INTERVAL '1 day' WHERE term = 'Spring 2027';
    ```
 
+   Officials can only answer an assignment before its game starts, and the seeded playoff games are in October 2026. To demo accept/decline (e.g. as `simvt0121`), move the scheduled games forward. They all start after every completed game, so the shift can't double-book a facility. Setting the time zone keeps the Blacksburg kickoff times across the daylight-saving change:
+
+   ```sql
+   SET timezone = 'America/New_York';
+   UPDATE Game SET start_time = start_time + INTERVAL '5 weeks', end_time = end_time + INTERVAL '5 weeks' WHERE status = 'scheduled';
+   ```
+
    If registering a team fails with `null value in column "status"`, your Docker volume predates the schema's column defaults. Recreate it (this deletes local data): `docker compose down -v`, then repeat steps 1–2.
 
 ## API (base URL `http://localhost:8000`)
@@ -57,6 +64,10 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | DELETE | `/api/teams/{team_id}/members/{player_id}` | | captain | Remove an active member (not the captain) before the lock date; row kept as `removed`. 204 |
 | POST | `/api/teams/{team_id}/leave` | | active member | Leave before the lock date; the captain must hand off first. 204 |
 | PUT | `/api/teams/{team_id}/captain` | `{user_id}` | captain | Hand off to an active member, any time. 200 → `{team_id, captain_id}` |
+| GET | `/api/games` | `?league_id=1&team_id=4` (both optional) | anyone | Schedule and results, oldest first. Teams are null for an undecided playoff game; scores come from the game's newest score report |
+| GET | `/api/me/assignments` | | signed in | Your officiating assignments with game details, `assignment_status` and `can_respond`; `[]` for non-officials |
+| POST | `/api/assignments/{assignment_id}/accept` | | assigned official | Only while `assigned` and before the game starts. 404 if it isn't yours; 409 if already answered or started. 204 |
+| POST | `/api/assignments/{assignment_id}/decline` | | assigned official | Same rules as accept. A declined official can't submit the game's score. 204 |
 | GET | `/api/reports/standings` | `?league_id=1` | anyone | Report 1. Regular-season W/L/T and points per team; forfeit = loss for the forfeiting team. 404 if no league |
 | GET | `/api/reports/participation` | `?term=Fall 2026` (optional) | anyone | Report 2. Teams, active players, pending invites, avg roster, games played/left per league |
 
