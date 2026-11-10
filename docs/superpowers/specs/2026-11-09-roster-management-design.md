@@ -95,7 +95,7 @@ Errors use the existing `{"detail": "..."}` shape: 401 not signed in, 403 not th
 
 Backend, in `backend/test_main.py` style (disposable schema, TestClient, CSRF header):
 - success path of each new endpoint;
-- 401 anonymous on every new write; 403 non-captain on invite, remove, hand-off, withdraw; 403 non-invitee on accept/decline;
+- 401 anonymous on every new write; 403 non-captain on invite, remove, hand-off, withdraw; 404 on accept/decline for a caller with no pending invite (these routes act on the caller's own row, so a non-invitee simply has none);
 - registration closed, roster locked, team full, already active in the league (invite and accept), suspended invitee, unknown PID, captain remove/leave refused;
 - triggers via raw SQL: setting the captain's row to `left` fails at commit; a second active roster in one league fails;
 - re-invite reuses the row; withdrawn re-invite keeps history; accept auto-declines other invites in the league; two concurrent accepts for the last spot yield one 200 and one 409;
