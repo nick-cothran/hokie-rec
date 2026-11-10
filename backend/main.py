@@ -91,6 +91,12 @@ class Invite(BaseModel):
     vt_pid: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
 
 
+class NewCaptain(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int
+
+
 class TeamRename(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -186,9 +192,9 @@ def list_leagues(sport: str | None = None, term: str | None = None):
 @app.post("/api/teams", status_code=201)
 def register_team(body: NewTeam, user: AuthenticatedUser):
     with db() as conn:
-        eligible = conn.execute("""
+        eligible = conn.execute(f"""
             SELECT 1 FROM Users WHERE user_id = %s AND role = 'player' AND is_active
-              AND (suspended_until IS NULL OR suspended_until < CURRENT_DATE)
+              AND (suspended_until IS NULL OR suspended_until < {LOCAL_TODAY})
         """, (user["user_id"],)).fetchone()
         if not eligible:
             raise HTTPException(403, "Only active, non-suspended players can register a team.")
@@ -234,8 +240,10 @@ def list_teams(league_id: int | None = None):
 @app.get("/api/teams/{team_id}")
 def get_team(team_id: int):
     with db() as conn:
-        team = conn.execute("""
-            SELECT t.team_id, t.team_name, t.status, t.captain_id, l.league_id, l.league_name
+        team = conn.execute(f"""
+            SELECT t.team_id, t.team_name, t.status, t.captain_id, l.league_id, l.league_name,
+                   l.min_roster_size, l.max_roster_size, l.roster_lock_date,
+                   {LOCAL_TODAY} >= l.roster_lock_date AS roster_locked
             FROM Team t JOIN League l ON l.league_id = t.league_id
             WHERE t.team_id = %s
         """, (team_id,)).fetchone()
@@ -373,6 +381,54 @@ def decline_invite(team_id: int, user: AuthenticatedUser):
         """, (team_id, user["user_id"])).rowcount
     if not declined:
         raise HTTPException(404, "You don't have a pending invite to this team.")
+
+
+# The captain removes an active member; the row stays as history
+@app.delete("/api/teams/{team_id}/members/{player_id}", status_code=204)
+def remove_member(team_id: int, player_id: int, user: AuthenticatedUser):
+    with db() as conn:
+        team = team_rules(conn, team_id, for_update=True)
+        require_team_captain(team, user)
+        require_unlocked(team)
+        if player_id == team["captain_id"]:
+            raise HTTPException(409, "The captain can't be removed. Hand off captaincy first.")
+        removed = conn.execute("""
+            UPDATE RosterMembership SET status = 'removed', left_at = NOW()
+            WHERE team_id = %s AND user_id = %s AND status = 'active'
+        """, (team_id, player_id)).rowcount
+    if not removed:
+        raise HTTPException(404, "That player isn't an active member of this team.")
+
+
+# An active member leaves before the roster lock date; the captain must hand off first
+@app.post("/api/teams/{team_id}/leave", status_code=204)
+def leave_team(team_id: int, user: AuthenticatedUser):
+    with db() as conn:
+        team = team_rules(conn, team_id, for_update=True)
+        if user["user_id"] == team["captain_id"]:
+            raise HTTPException(409, "Hand off captaincy before leaving the team.")
+        require_unlocked(team)
+        left = conn.execute("""
+            UPDATE RosterMembership SET status = 'left', left_at = NOW()
+            WHERE team_id = %s AND user_id = %s AND status = 'active'
+        """, (team_id, user["user_id"])).rowcount
+    if not left:
+        raise HTTPException(404, "You aren't an active member of this team.")
+
+
+# The captain hands captaincy to an active member. Allowed after the lock date: the roster doesn't change.
+@app.put("/api/teams/{team_id}/captain")
+def hand_off_captaincy(team_id: int, body: NewCaptain, user: AuthenticatedUser):
+    with db() as conn:
+        team = team_rules(conn, team_id, for_update=True)
+        require_team_captain(team, user)
+        if body.user_id == team["captain_id"]:
+            raise HTTPException(409, "You're already the captain.")
+        if not conn.execute("SELECT 1 FROM RosterMembership WHERE team_id = %s AND user_id = %s AND status = 'active'",
+                            (team_id, body.user_id)).fetchone():
+            raise HTTPException(409, "The new captain must be an active member of this team.")
+        return conn.execute("UPDATE Team SET captain_id = %s WHERE team_id = %s RETURNING team_id, captain_id",
+                            (body.user_id, team_id)).fetchone()
 
 
 # Report 1: regular-season standings from the latest score report per game; a forfeit is a loss for the forfeiting team

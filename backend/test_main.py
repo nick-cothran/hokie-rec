@@ -254,7 +254,7 @@ def client_for(user_id):
     return other
 
 
-class RosterTest(TeamCase):
+class RosterCase(TeamCase):
     def setUp(self):
         super().setUp()
         self.third = eligible_players(3)[2]
@@ -274,6 +274,9 @@ class RosterTest(TeamCase):
         sign_in(user_id)
         return client.post(f"/api/teams/{team_id or self.team_id}/invite/accept")
 
+
+
+class RosterTest(RosterCase):
     def test_captain_invites_by_pid(self):
         r = self.invite_pid(self.other)
         self.assertEqual(r.status_code, 201)
@@ -406,6 +409,97 @@ class RosterTest(TeamCase):
         self.assertEqual(sorted(codes), [204, 409])
         self.assertEqual(sql("SELECT COUNT(*) FROM RosterMembership WHERE team_id = %s AND status = 'active'",
                              (self.team_id,))[0][0], 2)
+
+
+class CaptainActionTest(RosterCase):
+    def setUp(self):
+        super().setUp()
+        self.invite_pid(self.other)
+        self.accept(self.other)
+        sign_in(self.captain)
+
+    def remove(self, player_id):
+        return client.delete(f"/api/teams/{self.team_id}/members/{player_id}")
+
+    def leave(self, user_id):
+        sign_in(user_id)
+        return client.post(f"/api/teams/{self.team_id}/leave")
+
+    def hand_off(self, user_id):
+        return client.put(f"/api/teams/{self.team_id}/captain", json={"user_id": user_id})
+
+    def test_team_detail_has_roster_limits(self):
+        team = client.get(f"/api/teams/{self.team_id}").json()
+        for key in ("min_roster_size", "max_roster_size", "roster_lock_date"):
+            self.assertIn(key, team)
+        self.assertIs(team["roster_locked"], False)
+
+    def test_captain_removes_member(self):
+        self.assertEqual(self.remove(self.other).status_code, 204)
+        self.assertEqual(sql("SELECT status, left_at IS NOT NULL FROM RosterMembership WHERE team_id = %s AND user_id = %s",
+                             (self.team_id, self.other)), [("removed", True)])
+
+    def test_captain_cannot_remove_self_409(self):
+        r = self.remove(self.captain)
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "The captain can't be removed. Hand off captaincy first."))
+
+    def test_remove_non_member_404(self):
+        r = self.remove(self.third)
+        self.assertEqual((r.status_code, r.json()["detail"]), (404, "That player isn't an active member of this team."))
+
+    def test_non_captain_cannot_remove_403(self):
+        sign_in(self.other)
+        self.assertEqual(self.remove(self.captain).status_code, 403)
+
+    def test_anonymous_remove_401(self):
+        client.cookies.clear()
+        self.assertEqual(self.remove(self.other).status_code, 401)
+
+    def test_remove_after_lock_409(self):
+        self.adjust_league("roster_lock_date = CURRENT_DATE - 1")
+        self.assertEqual(self.remove(self.other).status_code, 409)
+        self.assertEqual(self.status_of(self.other), "active")
+
+    def test_member_leaves(self):
+        self.assertEqual(self.leave(self.other).status_code, 204)
+        self.assertEqual(self.status_of(self.other), "left")
+
+    def test_captain_cannot_leave_409(self):
+        r = self.leave(self.captain)
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "Hand off captaincy before leaving the team."))
+
+    def test_non_member_cannot_leave_404(self):
+        r = self.leave(self.third)
+        self.assertEqual((r.status_code, r.json()["detail"]), (404, "You aren't an active member of this team."))
+
+    def test_leave_after_lock_409(self):
+        self.adjust_league("roster_lock_date = CURRENT_DATE - 1")
+        self.assertEqual(self.leave(self.other).status_code, 409)
+
+    def test_handoff_to_active_member(self):
+        r = self.hand_off(self.other)
+        self.assertEqual((r.status_code, r.json()), (200, {"team_id": self.team_id, "captain_id": self.other}))
+
+    def test_handoff_to_non_member_409(self):
+        r = self.hand_off(self.third)
+        self.assertEqual((r.status_code, r.json()["detail"]), (409, "The new captain must be an active member of this team."))
+
+    def test_non_captain_cannot_handoff_403(self):
+        sign_in(self.other)
+        self.assertEqual(self.hand_off(self.other).status_code, 403)
+        self.assertEqual(client.get(f"/api/teams/{self.team_id}").json()["captain_id"], self.captain)
+
+    def test_handoff_after_lock_ok(self):
+        self.adjust_league("roster_lock_date = CURRENT_DATE - 1")
+        self.assertEqual(self.hand_off(self.other).status_code, 200)
+
+    def test_handoff_then_leave(self):
+        self.hand_off(self.other)
+        self.assertEqual(self.remove(self.other).status_code, 403)
+        self.assertEqual(self.leave(self.captain).status_code, 204)
+        team = client.get(f"/api/teams/{self.team_id}").json()
+        self.assertEqual(team["captain_id"], self.other)
+        self.assertEqual(self.status_of(self.captain), "left")
 
 
 class TriggerTest(unittest.TestCase):
