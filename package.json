@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "seed": "docker compose exec -T db psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /seed.sql"
+    "seed": "docker compose exec -T db psql -U postgres -d postgres -1 -v ON_ERROR_STOP=1 -f /seed.sql"
   },
   "dependencies": {
     "react": "^19.3.1",

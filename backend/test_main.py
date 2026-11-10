@@ -29,8 +29,8 @@ def setUpModule():
     try:
         root = Path(__file__).resolve().parents[1]
         with psycopg.connect(DATABASE_URL) as conn:
-            conn.execute((root / "db/schema.sql").read_text())
-            conn.execute((root / "db/seed.sql").read_text())
+            for name in ("schema", "auth", "roster", "seed"):
+                conn.execute((root / f"db/{name}.sql").read_text())
             conn.execute("INSERT INTO UserCredentials (user_id, password_hash) SELECT user_id, %s FROM Users",
                          (password_hasher.hash(PASSWORD),))
     except Exception:
@@ -222,6 +222,27 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(len(client.get(f"/api/teams/{team_id}").json()["roster"]), 2)
 
 
+class TriggerTest(unittest.TestCase):
+    def test_captain_cannot_lose_active_row(self):
+        team_id, captain = sql("SELECT team_id, captain_id FROM Team ORDER BY team_id LIMIT 1")[0]
+        with self.assertRaises(psycopg.errors.CheckViolation) as ctx:
+            sql("UPDATE RosterMembership SET status = 'left' WHERE team_id = %s AND user_id = %s", (team_id, captain))
+        self.assertEqual(ctx.exception.diag.constraint_name, "team_captain_on_roster")
+
+    def test_second_active_roster_in_league_rejected(self):
+        player, a, b = sql("""
+            SELECT r.user_id, r.team_id, t2.team_id FROM RosterMembership r
+            JOIN Team t1 ON t1.team_id = r.team_id
+            JOIN Team t2 ON t2.league_id = t1.league_id AND t2.team_id <> t1.team_id
+            WHERE r.status = 'active' AND r.user_id <> t1.captain_id
+              AND NOT EXISTS (SELECT 1 FROM RosterMembership x WHERE x.team_id = t2.team_id AND x.user_id = r.user_id)
+            LIMIT 1""")[0]
+        with self.assertRaises(psycopg.errors.CheckViolation) as ctx:
+            sql("INSERT INTO RosterMembership (team_id, user_id, status, joined_at) VALUES (%s, %s, 'active', NOW())",
+                (b, player))
+        self.assertEqual(ctx.exception.diag.constraint_name, "roster_one_team_per_league")
+
+
 class AuthTest(unittest.TestCase):
     def setUp(self):
         client.cookies.clear()
@@ -337,7 +358,7 @@ class AuthTest(unittest.TestCase):
         self.assertEqual(client.delete(f"/api/teams/{team_id}?user_id={self.user_id}").status_code, 403)
 
     def test_auth_migration_is_rerunnable(self):
-        from migrate_auth import migrate
+        from migrate import migrate
         migrate()
         migrate()
         self.assertEqual(sql("SELECT COUNT(*) FROM Users")[0][0], 135)

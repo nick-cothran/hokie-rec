@@ -56,6 +56,9 @@ FRIENDLY_ERRORS = {
     "game_home_team_id_fkey": "This team has games on the schedule or in the results, so it can't be deleted.",
     "game_away_team_id_fkey": "This team has games on the schedule or in the results, so it can't be deleted.",
     "scorereport_forfeit_team_id_fkey": "This team has score reports on record, so it can't be deleted.",
+    # Raised by the triggers in db/roster.sql
+    "team_captain_on_roster": "A team's captain must be an active member of its roster.",
+    "roster_one_team_per_league": "A player can be on only one team per league.",
 }
 
 

@@ -14,11 +14,11 @@
    **Account logins:** From `/backend` with the venv active, run:
 
    ```powershell
-   python migrate_auth.py
+   python migrate.py
    python seed_demo_accounts.py --development
    ```
 
-   `migrate_auth.py` adds the authentication tables to existing databases without deleting data; it is safe to rerun. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
+   `migrate.py` adds the authentication tables and roster rules to existing databases without deleting data; it is safe to rerun. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
 
 3. From `/backend` (venv active), run `uvicorn main:app --reload`. The terminal prints the DB connection on startup.
 4. Open http://localhost:8000/docs to try every endpoint in the browser.
