@@ -208,3 +208,65 @@ def withdraw_invite(team_id: int, player_id: int, user_id: int):
         """, (team_id, player_id)).rowcount
     if not deleted:
         raise HTTPException(404, "No pending invite for that player on this team.")
+
+
+# Report 1: regular-season standings from the latest score report per game; a forfeit is a loss for the forfeiting team
+@app.get("/api/reports/standings")
+def standings(league_id: int):
+    with db() as conn:
+        if not conn.execute("SELECT 1 FROM League WHERE league_id = %s", (league_id,)).fetchone():
+            raise HTTPException(404, "League not found.")
+        return conn.execute("""
+            WITH latest AS (
+                SELECT DISTINCT ON (game_id) * FROM ScoreReport ORDER BY game_id, submitted_at DESC
+            ), sides AS (
+                SELECT g.home_team_id AS team_id, s.home_score AS pf, s.away_score AS pa, s.is_forfeit, s.forfeit_team_id
+                FROM Game g JOIN latest s ON s.game_id = g.game_id
+                WHERE g.league_id = %(league_id)s AND g.game_type = 'regular'
+                UNION ALL
+                SELECT g.away_team_id, s.away_score, s.home_score, s.is_forfeit, s.forfeit_team_id
+                FROM Game g JOIN latest s ON s.game_id = g.game_id
+                WHERE g.league_id = %(league_id)s AND g.game_type = 'regular'
+            ), results AS (
+                SELECT team_id, pf, pa,
+                       CASE WHEN is_forfeit THEN CASE WHEN forfeit_team_id = team_id THEN 'L' ELSE 'W' END
+                            WHEN pf > pa THEN 'W' WHEN pf < pa THEN 'L' ELSE 'T' END AS result
+                FROM sides
+                -- Skip incomplete reports: a forfeit needs the forfeiting team, a played game needs both scores
+                WHERE CASE WHEN is_forfeit THEN forfeit_team_id IS NOT NULL ELSE pf IS NOT NULL AND pa IS NOT NULL END
+            )
+            SELECT t.team_id, t.team_name,
+                   COUNT(r.result) AS played,
+                   COUNT(*) FILTER (WHERE r.result = 'W') AS wins,
+                   COUNT(*) FILTER (WHERE r.result = 'L') AS losses,
+                   COUNT(*) FILTER (WHERE r.result = 'T') AS ties,
+                   COALESCE(SUM(r.pf), 0) AS points_for,
+                   COALESCE(SUM(r.pa), 0) AS points_against,
+                   COALESCE(SUM(r.pf), 0) - COALESCE(SUM(r.pa), 0) AS point_diff
+            FROM Team t LEFT JOIN results r ON r.team_id = t.team_id
+            WHERE t.league_id = %(league_id)s
+            GROUP BY t.team_id
+            ORDER BY wins DESC, point_diff DESC, t.team_name
+        """, {"league_id": league_id}).fetchall()
+
+
+# Report 2: per-league participation and progress, optionally for one term
+@app.get("/api/reports/participation")
+def participation(term: str | None = None):
+    with db() as conn:
+        return conn.execute("""
+            SELECT l.league_id, l.league_name, l.sport_name, l.term, l.max_roster_size,
+                   COUNT(DISTINCT t.team_id) AS teams,
+                   COUNT(DISTINCT r.user_id) FILTER (WHERE r.status = 'active') AS active_players,
+                   COUNT(r.membership_id) FILTER (WHERE r.status = 'invited') AS pending_invites,
+                   ROUND(COUNT(r.membership_id) FILTER (WHERE r.status = 'active')::numeric
+                         / NULLIF(COUNT(DISTINCT t.team_id), 0), 1)::float AS avg_roster_size,
+                   (SELECT COUNT(*) FROM Game g WHERE g.league_id = l.league_id AND g.status = 'completed') AS games_played,
+                   (SELECT COUNT(*) FROM Game g WHERE g.league_id = l.league_id AND g.status = 'scheduled') AS games_remaining
+            FROM League l
+            LEFT JOIN Team t ON t.league_id = l.league_id
+            LEFT JOIN RosterMembership r ON r.team_id = t.team_id
+            WHERE (%(term)s::text IS NULL OR l.term = %(term)s)
+            GROUP BY l.league_id
+            ORDER BY l.start_date DESC, l.league_name
+        """, {"term": term}).fetchall()

@@ -29,6 +29,8 @@ There is no login yet: the UI's "Choose user" page (`/sign-in`) picks an "acting
 | PATCH | `/api/teams/{team_id}` | `{team_name, user_id}` | S3. Captain only. 200 → `{team_id, team_name}` |
 | DELETE | `/api/teams/{team_id}` | `?user_id=` | Captain only. Roster rows cascade; 409 if the team has games (RESTRICT). 204 |
 | DELETE | `/api/teams/{team_id}/invites/{player_id}` | `?user_id=` | S4. Captain only, pending invites only. 204 |
+| GET | `/api/reports/standings` | `?league_id=1` | Report 1. Regular-season W/L/T and points per team; forfeit = loss for the forfeiting team. 404 if no league |
+| GET | `/api/reports/participation` | `?term=Fall 2026` (optional) | Report 2. Teams, active players, pending invites, avg roster, games played/left per league |
 
 Errors always come back as `{"detail": "readable message"}`: 409 for a broken DB rule (e.g. duplicate team name in a league), 403 not allowed, 404 not found, 422 bad input.
 

@@ -1,8 +1,6 @@
 import '../styles/Leagues.css'
 import { Link, useSearchParams } from 'react-router-dom'
-import { query, useApi, type League } from '../api'
-
-const unique = (values: string[]) => [...new Set(values)].sort()
+import { query, unique, useApi, type League } from '../api'
 
 // S1: browse leagues by sport and term
 function Leagues() {

@@ -76,6 +76,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T
 }
 
+export const unique = (values: string[]) => [...new Set(values)].sort()
+
 // Builds "?a=1&b=2", skipping empty values
 export function query(params: Record<string, string | number | null | undefined>) {
   const search = new URLSearchParams()
@@ -108,4 +110,30 @@ export function useApi<T>(path: string | null) {
   const reload = useCallback(() => setVersion(v => v + 1), [])
   const loading = path !== null && result.key !== key
   return { data: result.data, error: loading ? '' : result.error, loading, reload }
+}
+
+export type Standing = {
+  team_id: number
+  team_name: string
+  played: number
+  wins: number
+  losses: number
+  ties: number
+  points_for: number
+  points_against: number
+  point_diff: number
+}
+
+export type Participation = {
+  league_id: number
+  league_name: string
+  sport_name: string
+  term: string
+  max_roster_size: number
+  teams: number
+  active_players: number
+  pending_invites: number
+  avg_roster_size: number | null
+  games_played: number
+  games_remaining: number
 }
