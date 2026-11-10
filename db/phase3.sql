@@ -41,14 +41,17 @@ BEGIN
     END IF;
 END $$;
 
+-- Views are dropped and recreated so a rerun picks up columns added to League or ScoreReport later.
 -- League with its sport's details and display name, e.g. "Coed Soccer, Recreational, Fall 2026"
-CREATE OR REPLACE VIEW LeagueView AS
+DROP VIEW IF EXISTS LeagueView;
+CREATE VIEW LeagueView AS
 SELECT l.*, s.sport_name, s.min_roster_size, s.max_roster_size,
        l.category || ' ' || s.sport_name || ', ' || l.skill_level || ', ' || l.term AS league_name
 FROM League l JOIN Sport s ON s.sport_id = l.sport_id;
 
 -- The report that counts for each game: corrections are new reports, so the newest wins
-CREATE OR REPLACE VIEW LatestScoreReport AS
+DROP VIEW IF EXISTS LatestScoreReport;
+CREATE VIEW LatestScoreReport AS
 SELECT DISTINCT ON (game_id) * FROM ScoreReport ORDER BY game_id, submitted_at DESC, report_id DESC;
 
 -- A game's teams play in the game's league. Either may be empty for a future playoff game.

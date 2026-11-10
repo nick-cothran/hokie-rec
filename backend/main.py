@@ -183,7 +183,7 @@ def list_leagues(sport: str | None = None, term: str | None = None):
             FROM LeagueView l
             WHERE (%(sport)s::text IS NULL OR l.sport_name = %(sport)s)
               AND (%(term)s::text IS NULL OR l.term = %(term)s)
-            ORDER BY l.league_name
+            ORDER BY l.start_date, l.league_name
         """, {"sport": sport, "term": term}).fetchall()
 
 
@@ -231,8 +231,8 @@ def list_teams(league_id: int | None = None):
             JOIN Users u ON u.user_id = t.captain_id
             LEFT JOIN RosterMembership r ON r.team_id = t.team_id
             WHERE (%(league_id)s::int IS NULL OR t.league_id = %(league_id)s)
-            GROUP BY t.team_id, l.league_id, l.league_name, l.sport_name, l.term, u.user_id
-            ORDER BY l.league_name, t.team_name
+            GROUP BY t.team_id, l.league_id, l.league_name, l.sport_name, l.term, l.start_date, u.user_id
+            ORDER BY l.start_date, l.league_name, t.team_name
         """, {"league_id": league_id}).fetchall()
 
 
