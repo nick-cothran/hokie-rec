@@ -106,6 +106,37 @@ class TeamCase(unittest.TestCase):
 
 
 class ApiTest(TeamCase):
+    def test_leagues_report_open_closed_and_upcoming_registration(self):
+        def registration():
+            response = client.get("/api/leagues")
+            self.assertEqual(response.status_code, 200)
+            return next(row for row in response.json() if row["league_id"] == self.league_id)
+
+        self.adjust_league("reg_open_at = NOW() - INTERVAL '2 days', reg_close_at = NOW() - INTERVAL '1 day'")
+        closed = registration()
+        self.assertFalse(closed["registration_open"])
+        self.assertIn("reg_open_at", closed)
+        self.assertIn("reg_close_at", closed)
+
+        self.adjust_league("reg_open_at = NOW() + INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '2 days'")
+        self.assertFalse(registration()["registration_open"])
+        self.assertEqual(self.register().status_code, 409)
+
+        self.adjust_league("reg_open_at = NOW() - INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '1 day'")
+        self.assertTrue(registration()["registration_open"])
+        self.assertEqual(self.register().status_code, 201)
+
+    def test_seed_has_six_leagues_open_on_november_10(self):
+        rows = sql("""
+            SELECT sport_name,
+                   TIMESTAMPTZ '2026-11-10 12:00:00-05:00' BETWEEN reg_open_at AND reg_close_at
+            FROM LeagueView
+            WHERE term = 'Spring 2027' AND reg_open_at = TIMESTAMPTZ '2026-11-01 09:00:00-05:00'
+        """)
+        self.assertEqual({row[0] for row in rows},
+                         {'Soccer', 'Basketball', 'Volleyball', 'Flag Football', 'Ultimate Frisbee', 'Dodgeball'})
+        self.assertTrue(all(row[1] for row in rows))
+
     def test_s2_registration_closed_is_409(self):
         self.adjust_league("reg_close_at = NOW() - INTERVAL '1 minute'")
         r = self.register()
