@@ -12,6 +12,7 @@ from typing import Annotated
 
 from database import db
 from auth import AuthenticatedUser, router as auth_router
+from scores import router as scores_router
 
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(scores_router)
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 
 
@@ -171,6 +173,8 @@ def list_leagues(sport: str | None = None, term: str | None = None):
     with db() as conn:
         return conn.execute("""
             SELECT l.league_id, l.league_name, l.sport_name, l.category, l.skill_level, l.term,
+                   l.reg_open_at, l.reg_close_at,
+                   NOW() BETWEEN l.reg_open_at AND l.reg_close_at AS registration_open,
                    (SELECT COUNT(*) FROM Team t WHERE t.league_id = l.league_id) AS team_count
             FROM LeagueView l
             WHERE (%(sport)s::text IS NULL OR l.sport_name = %(sport)s)
