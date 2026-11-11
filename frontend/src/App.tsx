@@ -8,6 +8,7 @@ import Teams from './components/Teams'
 import TeamDetail from './components/TeamDetail'
 import RegisterTeam from './components/RegisterTeam'
 import Schedule from './components/Schedule'
+import ScoreEntry from './components/ScoreEntry'
 import Reports from './components/Reports'
 import IncidentReports from './components/IncidentReports'
 import Resources from './components/Resources'
@@ -31,6 +32,7 @@ function App() {
             <Route path="/teams/new" element={<RegisterTeam />} />
             <Route path="/teams/:teamId" element={<TeamDetail />} />
             <Route path="/schedule" element={<Schedule />} />
+            <Route path="/games/:gameId/score" element={<ScoreEntry />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/incidents" element={<IncidentReports />} />
             <Route path="/resources" element={<Resources />} />

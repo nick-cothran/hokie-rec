@@ -2,15 +2,8 @@ import '../styles/Schedule.css'
 import '../styles/Teams.css'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api, query, useApi, type Assignment, type Game, type League } from '../api'
+import { api, formatGameTime as when, query, useApi, type Assignment, type Game, type League } from '../api'
 import { useAuth } from '../auth'
-
-// Game times are campus (Blacksburg) times
-function when(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-  })
-}
 
 function result(g: Game) {
   if (g.forfeit_team_id !== null) {
@@ -61,6 +54,11 @@ function Assignments() {
                 {when(a.start_time)} · {a.facility_name} · {a.league_name} · {a.position} · <span className={`pill pill-${a.assignment_status}`}>{a.assignment_status}</span>
               </span>
             </div>
+            {a.assignment_status !== 'declined' && a.home_team_id !== null && a.away_team_id !== null && a.has_ended && (
+              <Link className={`button button-small ${a.status === 'completed' ? 'button-outline' : 'button-primary'}`} to={`/games/${a.game_id}/score`}>
+                {a.status === 'completed' ? 'View result' : 'Enter result'}
+              </Link>
+            )}
             {a.can_respond && (
               <div className="form-row">
                 <button className="button button-primary button-small" type="button" disabled={busy} onClick={() => answer(a, 'accept')}>Accept</button>
@@ -122,7 +120,7 @@ function Schedule() {
                     <td><TeamLink id={g.home_team_id} name={g.home_team_name} /></td>
                     <td><TeamLink id={g.away_team_id} name={g.away_team_name} /></td>
                     <td>{round(g)}</td>
-                    <td>{result(g)}</td>
+                    <td>{user?.role === 'admin' && g.status === 'completed' ? <Link to={`/games/${g.game_id}/score`}>{result(g)}</Link> : result(g)}</td>
                   </tr>
                 ))}
               </tbody>
