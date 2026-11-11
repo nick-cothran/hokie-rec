@@ -1037,6 +1037,144 @@ class SignUpTest(unittest.TestCase):
         self.assertEqual(seed_demo_accounts(), 0)
         sql("UPDATE UserCredentials SET password_hash = %s WHERE user_id IN (SELECT user_id FROM Users WHERE vt_pid LIKE 'simvt%%')",
             (password_hasher.hash(PASSWORD),))
+
+
+class PasswordChangeTest(unittest.TestCase):
+    NEW_PASSWORD = "A brand new password 2026"
+
+    def setUp(self):
+        client.cookies.clear()
+        sql("DELETE FROM AuthSession")
+        sql("DELETE FROM AuthLoginAttempt")
+        self.user_id = sql("SELECT user_id FROM Users WHERE vt_pid = 'simvt0002'")[0][0]
+        self.addCleanup(sql, "UPDATE UserCredentials SET password_hash = %s WHERE user_id = %s",
+                        (password_hasher.hash(PASSWORD), self.user_id))
+        sign_in(self.user_id)
+
+    def change(self, current=PASSWORD, new=NEW_PASSWORD):
+        return client.post("/api/auth/password", json={"current_password": current, "new_password": new})
+
+    def login(self, password):
+        return client.post("/api/auth/login", json={"vt_pid": "simvt0002", "password": password})
+
+    def test_change_password_and_sign_in_with_new_one(self):
+        self.assertEqual(self.change().status_code, 204)
+        stored = sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0]
+        self.assertNotEqual(stored, self.NEW_PASSWORD)
+        self.assertTrue(password_hasher.verify(self.NEW_PASSWORD, stored))
+        self.assertEqual(client.get("/api/auth/me").json()["user_id"], self.user_id)  # this browser stays signed in
+        client.post("/api/auth/logout")
+        self.assertEqual(self.login(PASSWORD).status_code, 401)
+        self.assertEqual(self.login(self.NEW_PASSWORD).status_code, 200)
+
+    def test_change_signs_out_other_sessions(self):
+        with TestClient(app, headers={"X-Requested-With": "HokieRec"}) as other_browser:
+            other_browser.post("/api/auth/login", json={"vt_pid": "simvt0002", "password": PASSWORD})
+            self.assertEqual(other_browser.get("/api/auth/me").status_code, 200)
+            old_token = client.cookies.get(COOKIE_NAME)
+            self.assertEqual(self.change().status_code, 204)
+            self.assertEqual(other_browser.get("/api/auth/me").status_code, 401)
+        self.assertNotEqual(client.cookies.get(COOKIE_NAME), old_token)  # this browser's session rotates
+        self.assertEqual(sql("SELECT COUNT(*) FROM AuthSession WHERE user_id = %s", (self.user_id,))[0][0], 1)
+
+    def test_wrong_current_password_is_400_and_changes_nothing(self):
+        before = sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0]
+        response = self.change(current="not my password")
+        self.assertEqual((response.status_code, response.json()["detail"]), (400, "Your current password is incorrect."))
+        self.assertEqual(sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0], before)
+        self.assertEqual(client.get("/api/auth/me").status_code, 200)
+
+    def test_new_password_rules(self):
+        self.assertEqual(self.change(new="too short").status_code, 422)
+        self.assertEqual(self.change(new="x" * 129).status_code, 422)
+        same = PASSWORD
+        self.assertEqual(self.change(new=same).status_code, 400)
+
+    def test_requires_sign_in_and_csrf_header(self):
+        with TestClient(app) as browser:
+            body = {"current_password": PASSWORD, "new_password": self.NEW_PASSWORD}
+            self.assertEqual(browser.post("/api/auth/password", json=body).status_code, 403)
+        client.cookies.clear()
+        self.assertEqual(self.change().status_code, 401)
+
+    def test_wrong_guesses_are_rate_limited(self):
+        for _ in range(10):
+            self.assertEqual(self.change(current="guess").status_code, 400)
+        response = self.change()
+        self.assertEqual(response.status_code, 429)
+        self.assertTrue(password_hasher.verify(PASSWORD, sql(
+            "SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0]))
+
+
+class AdminUsersTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        sql("DELETE FROM AuthLoginAttempt")
+        self.admin = sql("SELECT user_id FROM Users WHERE role = 'admin' ORDER BY user_id LIMIT 1")[0][0]
+        self.pid = "admin_made_" + uuid.uuid4().hex[:12]
+        self.details = {
+            "vt_pid": self.pid, "first_name": "New", "last_name": "Official",
+            "email": self.pid + "@example.com", "phone": "540-555-0188",
+            "role": "official", "password": "Initial password 2026",
+        }
+        self.addCleanup(sql, "DELETE FROM Users WHERE LEFT(vt_pid, LENGTH(%s)) = %s", (self.pid, self.pid))
+
+    def create(self, **changes):
+        return client.post("/api/admin/users", json={**self.details, **changes})
+
+    def test_admin_creates_official_who_can_sign_in(self):
+        sign_in(self.admin)
+        response = self.create()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["role"], "official")
+        self.assertEqual(client.get("/api/auth/me").json()["user_id"], self.admin)  # admin stays signed in
+        stored = sql("SELECT c.password_hash FROM UserCredentials c JOIN Users u USING (user_id) WHERE u.vt_pid = %s",
+                     (self.pid,))[0][0]
+        self.assertNotEqual(stored, self.details["password"])
+        client.cookies.clear()
+        login = client.post("/api/auth/login", json={"vt_pid": self.pid, "password": self.details["password"]})
+        self.assertEqual((login.status_code, login.json()["role"]), (200, "official"))
+
+    def test_admin_can_create_every_role(self):
+        sign_in(self.admin)
+        for n, role in enumerate(("player", "official", "admin")):
+            with self.subTest(role=role):
+                response = self.create(vt_pid=f"{self.pid}{n}", email=f"{self.pid}{n}@example.com", role=role)
+                self.assertEqual((response.status_code, response.json()["role"]), (201, role))
+
+    def test_admin_lists_users_with_contact_details(self):
+        sign_in(self.admin)
+        self.create()
+        users = client.get("/api/admin/users").json()
+        self.assertEqual(len(users), sql("SELECT COUNT(*) FROM Users")[0][0])
+        mine = next(u for u in users if u["vt_pid"] == self.pid)
+        self.assertEqual((mine["role"], mine["email"], mine["is_active"]), ("official", self.details["email"], True))
+        self.assertNotIn("password_hash", mine)
+
+    def test_non_admins_cannot_list_or_create(self):
+        for role in ("player", "official"):
+            with self.subTest(role=role):
+                client.cookies.clear()
+                sign_in(sql("SELECT user_id FROM Users WHERE role = %s AND is_active ORDER BY user_id LIMIT 1", (role,))[0][0])
+                self.assertEqual(client.get("/api/admin/users").status_code, 403)
+                self.assertEqual(self.create().status_code, 403)
+        client.cookies.clear()
+        self.assertEqual(client.get("/api/admin/users").status_code, 401)
+        self.assertEqual(self.create().status_code, 401)
+        self.assertEqual(sql("SELECT COUNT(*) FROM Users WHERE vt_pid = %s", (self.pid,))[0][0], 0)
+
+    def test_duplicates_and_validation(self):
+        sign_in(self.admin)
+        self.assertEqual(self.create().status_code, 201)
+        duplicate = self.create(email="other_" + self.details["email"])
+        self.assertEqual((duplicate.status_code, duplicate.json()["detail"]), (409, "That PID or email is already registered."))
+        for changes in ({"role": "superuser"}, {"role": None}, {"password": "short"}, {"email": "nope"},
+                        {"vt_pid": "bad pid"}, {"is_active": False}):
+            with self.subTest(changes=changes):
+                fresh = {"vt_pid": self.pid + "x", "email": "x" + self.details["email"], **changes}
+                self.assertEqual(self.create(**fresh).status_code, 422)
+
+
 class ReportTest(unittest.TestCase):
     def setUp(self):
         # The league with the most forfeits, so the forfeit rule is exercised

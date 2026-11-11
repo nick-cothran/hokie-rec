@@ -128,24 +128,29 @@ def set_session_cookie(response: Response, token: str):
                         httponly=True, secure=COOKIE_SECURE, samesite="lax", path="/api")
 
 
+def create_account(conn, details: SignUp, role: str) -> dict:
+    """Insert the profile and its password hash; the caller's transaction commits both or neither."""
+    account = conn.execute("""
+        INSERT INTO Users (vt_pid, first_name, last_name, email, phone, role)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING user_id, first_name, last_name, role
+    """, (details.vt_pid, details.first_name, details.last_name, details.email, details.phone, role)).fetchone()
+    conn.execute("INSERT INTO UserCredentials (user_id, password_hash) VALUES (%s, %s)",
+                 (account["user_id"], password_hasher.hash(details.password)))
+    return account
+
+
 @router.post("/sign-up", response_model=User, status_code=201)
 def sign_up(body: SignUp, request: Request, response: Response):
     # Do not trust forwarded headers supplied by a caller. A new-account flood
     # must share a budget even when every attempted PID is different.
     host = request.client.host if request.client else "unknown"
     limit_attempts(f"signup:{host}", 10, "Too many account creation attempts. Try again in 15 minutes.")
-    password_hash = password_hasher.hash(body.password)
     try:
         # Profile, credentials, and session succeed or roll back together. Never
         # attach a new password to an existing PID or accept a caller's role.
         with db() as conn:
-            account = conn.execute("""
-                INSERT INTO Users (vt_pid, first_name, last_name, email, phone, role)
-                VALUES (%s, %s, %s, %s, %s, 'player')
-                RETURNING user_id, first_name, last_name, role
-            """, (body.vt_pid, body.first_name, body.last_name, body.email, body.phone)).fetchone()
-            conn.execute("INSERT INTO UserCredentials (user_id, password_hash) VALUES (%s, %s)",
-                         (account["user_id"], password_hash))
+            account = create_account(conn, body, "player")
             token = issue_session(conn, account["user_id"], request)
             conn.execute("DELETE FROM AuthLoginAttempt WHERE identifier_hash = %s", (token_hash(body.vt_pid),))
     except UniqueViolation:
@@ -189,3 +194,34 @@ def logout(request: Request, response: Response):
         with db() as conn:
             conn.execute("DELETE FROM AuthSession WHERE token_hash = %s", (token_hash(token),))
     response.delete_cookie(COOKIE_NAME, path="/api", httponly=True, secure=COOKIE_SECURE, samesite="lax")
+
+
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    new_password: Annotated[str, StringConstraints(min_length=12, max_length=128)]
+
+
+@router.post("/password", status_code=204)
+def change_password(body: PasswordChange, user: AuthenticatedUser, request: Request, response: Response):
+    # A stolen session must not be able to guess the current password indefinitely.
+    limit_attempts(f"password:{user['user_id']}", LOGIN_LIMIT, "Too many password attempts. Try again in 15 minutes.")
+    with db() as conn:
+        stored = conn.execute("SELECT password_hash FROM UserCredentials WHERE user_id = %s",
+                              (user["user_id"],)).fetchone()
+    # 400, not 401: a wrong current password must not look like an expired session to the UI.
+    if stored is None or not password_hasher.verify(body.current_password, stored["password_hash"]):
+        raise HTTPException(400, "Your current password is incorrect.")
+    if body.new_password == body.current_password:
+        raise HTTPException(400, "Choose a new password that is different from your current one.")
+
+    with db() as conn:
+        conn.execute("UPDATE UserCredentials SET password_hash = %s WHERE user_id = %s",
+                     (password_hasher.hash(body.new_password), user["user_id"]))
+        # Sign out every other browser, then give this one a fresh session.
+        conn.execute("DELETE FROM AuthSession WHERE user_id = %s", (user["user_id"],))
+        token = issue_session(conn, user["user_id"], request)
+        conn.execute("DELETE FROM AuthLoginAttempt WHERE identifier_hash = %s",
+                     (token_hash(f"password:{user['user_id']}"),))
+    set_session_cookie(response, token)

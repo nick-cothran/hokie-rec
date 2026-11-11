@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { fullName, useAuth } from '../auth'
 import { accountDestination, accountLink } from '../authNavigation'
+import ChangePassword from './ChangePassword'
 
 function SignIn() {
   const { user, loading, error: sessionError, signIn, signOut } = useAuth()
@@ -45,7 +46,9 @@ function SignIn() {
           <div className="signin-form">
             <p>Signed in as <strong>{fullName(user)}</strong> ({user.role}).</p>
             <Link className="button button-primary" to="/teams">Go to teams</Link>
+            {user.role === 'admin' && <Link className="button button-outline" to="/admin/users">Manage accounts</Link>}
             <button className="button button-outline" type="button" disabled={busy} onClick={logout}>{busy ? 'Signing out…' : 'Sign out'}</button>
+            <ChangePassword />
           </div>
         ) : (
           <>
