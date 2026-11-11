@@ -690,6 +690,76 @@ class AssignmentTest(unittest.TestCase):
         self.assertFalse(row["can_respond"])
 
 
+class IncidentApiTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        uid = lambda pid: sql("SELECT user_id FROM Users WHERE vt_pid = %s", (pid,))[0][0]
+        self.official = uid("simvt0121")
+        self.other_official = uid("simvt0122")
+        self.player = uid("simvt0001")
+        self.admin = uid("simvt0133")
+        self.game_id = sql("""
+            INSERT INTO Game (league_id, facility_id, start_time, end_time, playoff_round)
+            SELECT league_id, (SELECT MIN(facility_id) FROM Facility),
+                   NOW() + INTERVAL '7 days', NOW() + INTERVAL '7 days 1 hour', 3
+            FROM Game ORDER BY game_id LIMIT 1 RETURNING game_id
+        """)[0][0]
+        self.addCleanup(sql, "DELETE FROM Game WHERE game_id = %s", (self.game_id,))
+        sql("""
+            INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status)
+            VALUES (%s, %s, %s, 'referee', 'assigned')
+        """, (self.game_id, self.official, self.admin))
+
+    def file_report(self, user_id=None, payload=None):
+        sign_in(user_id or self.official)
+        return client.post(f"/api/games/{self.game_id}/incident-reports", json=payload or {
+            "incident_type": "conduct", "description": "A test incident", "involved_user_pid": "simvt0001",
+        })
+
+    def test_assigned_official_files_and_admin_resolves_report(self):
+        response = self.file_report()
+        self.assertEqual(response.status_code, 201, response.text)
+        report_id = response.json()["incident_id"]
+        self.addCleanup(sql, "DELETE FROM IncidentReport WHERE incident_id = %s", (report_id,))
+
+        own = client.get("/api/incidents")
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(own.headers["cache-control"], "no-store")
+        report = next(item for item in own.json() if item["incident_id"] == report_id)
+        self.assertEqual((report["status"], report["incident_type"], report["involved_user_id"]),
+                         ("open", "conduct", self.player))
+
+        sign_in(self.admin)
+        all_reports = client.get("/api/incidents")
+        self.assertIn(report_id, [item["incident_id"] for item in all_reports.json()])
+        resolved = client.patch(f"/api/incidents/{report_id}", json={"status": "reviewed"})
+        self.assertEqual(resolved.status_code, 200, resolved.text)
+        self.assertEqual(resolved.json()["reviewed_by"], self.admin)
+        repeated = client.patch(f"/api/incidents/{report_id}", json={"status": "dismissed"})
+        self.assertEqual(repeated.status_code, 409)
+
+    def test_players_and_unassigned_officials_cannot_file(self):
+        self.assertEqual(client.get("/api/incidents").status_code, 401)
+        self.assertEqual(self.file_report(self.player).status_code, 403)
+        self.assertEqual(self.file_report(self.other_official).status_code, 403)
+        sign_in(self.player)
+        self.assertEqual(client.get("/api/incidents").status_code, 403)
+
+    def test_declined_and_cancelled_games_cannot_receive_reports(self):
+        sql("UPDATE OfficiatingAssignment SET status = 'declined' WHERE game_id = %s", (self.game_id,))
+        self.assertEqual(self.file_report().status_code, 403)
+        sql("UPDATE OfficiatingAssignment SET status = 'assigned' WHERE game_id = %s", (self.game_id,))
+        sql("UPDATE Game SET status = 'cancelled' WHERE game_id = %s", (self.game_id,))
+        response = self.file_report()
+        self.assertEqual(response.status_code, 409)
+
+    def test_invalid_person_pid_is_reported_as_not_found(self):
+        response = self.file_report(payload={
+            "incident_type": "conduct", "description": "A test incident", "involved_user_pid": "unknown-pid",
+        })
+        self.assertEqual(response.status_code, 404)
+
+
 class TriggerTest(unittest.TestCase):
     def test_captain_cannot_lose_active_row(self):
         team_id, captain = sql("SELECT team_id, captain_id FROM Team ORDER BY team_id LIMIT 1")[0]

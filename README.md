@@ -68,10 +68,15 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | GET | `/api/me/assignments` | | signed in | Your officiating assignments with game details, `assignment_status` and `can_respond`; `[]` for non-officials |
 | POST | `/api/assignments/{assignment_id}/accept` | | assigned official | Only while `assigned` and before the game starts. 404 if it isn't yours; 409 if already answered or started. 204 |
 | POST | `/api/assignments/{assignment_id}/decline` | | assigned official | Same rules as accept. A declined official can't submit the game's score. 204 |
+| GET | `/api/incidents` | | official or admin | Private reports: an official sees reports they filed; admins see all reports |
+| POST | `/api/games/{game_id}/incident-reports` | `{incident_type, description, involved_user_pid?}` | assigned official | Files an open report for an assigned game; optional PID identifies an involved user. 201 |
+| PATCH | `/api/incidents/{incident_id}` | `{status: "reviewed" \| "dismissed"}` | admin | Resolves an open report and records the reviewing administrator. 409 if already resolved |
 | GET | `/api/reports/standings` | `?league_id=1` | anyone | Report 1. Regular-season W/L/T and points per team; forfeit = loss for the forfeiting team. 404 if no league |
 | GET | `/api/reports/participation` | `?term=Fall 2026` (optional) | anyone | Report 2. Teams, active players, pending invites, avg roster, games played/left per league |
 
 Schema (Phase III): roster limits live on `Sport`; a league's display name (`league_name`, e.g. "Coed Soccer, Recreational, Fall 2026") and its sport's limits come from the `LeagueView` view. A game is a playoff game when `playoff_round` is set, a score report is a forfeit when `forfeit_team_id` is set, and standings use the newest report per game (`LatestScoreReport` view). Triggers in `db/phase3.sql` enforce that only the game's assigned official (not one who declined) submits a score report, reports are never edited, a forfeit names one of the game's teams, a game's teams play in its league, officials are assigned and file incidents, and admins assign officials and review incidents.
+
+Incident reports are private to assigned officials and administrators. Officials may file reports for games assigned to them unless they declined or the game was cancelled. Administrators may mark an open report reviewed or dismissed; resolved reports cannot be changed through the API.
 
 Roster statuses: `invited` → `active`, `declined`, `removed` or `left`. Two database triggers (`db/roster.sql`) also enforce that a captain is always an active member of their team and that a player is active on at most one team per league.
 

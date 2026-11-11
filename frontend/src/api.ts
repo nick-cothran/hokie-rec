@@ -218,3 +218,30 @@ export type Game = {
 
 // One of the signed-in official's assignments (GET /api/me/assignments)
 export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean }
+
+export type IncidentReport = {
+  incident_id: number
+  game_id: number
+  league_id: number
+  league_name: string
+  start_time: string
+  facility_name: string
+  location: string
+  home_team_id: number | null
+  home_team_name: string | null
+  away_team_id: number | null
+  away_team_name: string | null
+  incident_type: string
+  description: string
+  status: 'open' | 'reviewed' | 'dismissed'
+  filed_at: string
+  filed_by: number
+  filed_by_first_name: string
+  filed_by_last_name: string
+  involved_user_id: number | null
+  involved_first_name: string | null
+  involved_last_name: string | null
+  reviewed_by: number | null
+  reviewed_by_first_name: string | null
+  reviewed_by_last_name: string | null
+}

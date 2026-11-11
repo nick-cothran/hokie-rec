@@ -1,0 +1,16 @@
+.incident-page { display: grid; align-content: start; gap: 1.5rem; }
+.incident-page .page-intro { margin-bottom: 0; }
+.incident-form { max-width: 680px; }
+.field textarea { width: 100%; min-height: 120px; padding: 0.65rem 0.7rem; border: 1px solid #c6d0dc; border-radius: 3px; background: white; color: var(--ink); font: inherit; font-size: 0.9rem; resize: vertical; }
+.field textarea:focus { border-color: var(--orange); outline: 3px solid rgba(232, 119, 34, 0.18); }
+.incident-list { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
+.incident-card { display: grid; gap: 0.9rem; }
+.incident-card-heading { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.incident-card-heading h3 { margin: 0; font-size: 1.1rem; }
+.incident-card-heading .eyebrow { margin-bottom: 0.35rem; }
+.incident-description { margin: 0; white-space: pre-wrap; }
+.incident-card .meta-list { margin: 0; }
+.incident-card .meta-list a { color: var(--orange-dark); font-weight: 700; text-decoration: none; }
+.incident-actions { margin-top: 0.2rem; }
+.pill-reviewed { background: #e6f4ea; color: #1e6b34; }
+.pill-dismissed { background: #f1f1f1; color: #536278; }
