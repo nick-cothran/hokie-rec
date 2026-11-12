@@ -15,6 +15,7 @@ function LeagueDetail() {
   const leagues = useApi<League[]>(valid ? '/api/leagues' : null)
   const teams = useApi<TeamSummary[]>(valid ? `/api/teams${query({ league_id: id })}` : null)
   const league = leagues.data?.find(l => l.league_id === id)
+  const registrationOpen = !!league?.registration_open
 
   if (!valid || (leagues.data && !league)) {
     return (
@@ -48,7 +49,7 @@ function LeagueDetail() {
                   <li>Level <strong>{league.skill_level}</strong></li>
                 </ul>
               </div>
-              {canRegister && <Link className="button button-primary" to={`/teams/new${query({ league: id })}`}>Register a team</Link>}
+              {canRegister && registrationOpen && <Link className="button button-primary" to={`/teams/new${query({ league: id })}`}>Register a team</Link>}
             </div>
           </div>
           <section>
@@ -56,7 +57,7 @@ function LeagueDetail() {
             {teams.error && <p className="notice notice-error" role="alert">{teams.error}</p>}
             {teams.loading && !teams.data && <p className="loading">Loading teams…</p>}
             {teams.data && teams.data.length === 0 && (
-              <div className="empty-state"><h2>No teams yet</h2><p>{canRegister ? 'Be the first to register a team in this league.' : 'No teams have registered for this league.'}</p></div>
+              <div className="empty-state"><h2>No teams yet</h2><p>{canRegister && registrationOpen ? 'Be the first to register a team in this league.' : 'No teams have registered for this league.'}</p></div>
             )}
             {teams.data && teams.data.length > 0 && <TeamTable teams={teams.data} showLeague={false} />}
           </section>

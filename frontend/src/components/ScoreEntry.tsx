@@ -1,16 +1,13 @@
 import '../styles/ScoreEntry.css'
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, formatGameTime, useApi, type ScoreReport, type ScoreSheet } from '../api'
+import { api, forfeitLabel, formatGameTime, useApi, type ScoreReport, type ScoreSheet } from '../api'
 import { fullName, useAuth } from '../auth'
 
 type Game = ScoreSheet['game']
 
 function describe(report: ScoreReport, game: Game) {
-  if (report.forfeit_team_id !== null) {
-    const team = report.forfeit_team_id === game.home_team_id ? game.home_team_name : game.away_team_name
-    return `Forfeit by ${team}`
-  }
+  if (report.forfeit_team_id !== null) return forfeitLabel(game, report.forfeit_team_id)
   return `${game.home_team_name} ${report.home_score} – ${report.away_score} ${game.away_team_name}`
 }
 

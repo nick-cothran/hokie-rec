@@ -2,20 +2,14 @@ import '../styles/Schedule.css'
 import '../styles/Teams.css'
 import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { api, formatGameTime as when, query, useApi, type Assignment, type Game, type League, type MyGames, type Official } from '../api'
+import { api, forfeitLabel, formatGameTime as when, gameRound as round, query, useApi, type Assignment, type Game, type League, type MyGames, type Official } from '../api'
 import { useAuth } from '../auth'
 
 function result(g: Game) {
-  if (g.forfeit_team_id !== null) {
-    return `Forfeit: ${g.forfeit_team_id === g.home_team_id ? g.home_team_name : g.away_team_name}`
-  }
+  if (g.forfeit_team_id !== null) return forfeitLabel(g, g.forfeit_team_id)
   if (g.home_score !== null && g.away_score !== null) return `${g.home_score}–${g.away_score}`
+  if (g.status === 'scheduled' && new Date(g.end_time).getTime() < Date.now()) return 'Awaiting result'
   return g.status
-}
-
-function round(g: Game) {
-  if (g.playoff_round === null) return ''
-  return g.next_game_id === null ? 'Final' : `Playoff round ${g.playoff_round}`
 }
 
 function TeamLink({ id, name }: { id: number | null; name: string | null }) {
@@ -82,7 +76,7 @@ function Assignments() {
                 {when(a.start_time)} · {a.facility_name} · {a.league_name} · {a.position} · <span className={`pill pill-${a.assignment_status}`}>{a.assignment_status}</span>
               </span>
             </div>
-            {a.assignment_status !== 'declined' && a.home_team_id !== null && a.away_team_id !== null && a.has_ended && (
+            {a.assignment_status !== 'declined' && a.status !== 'cancelled' && a.home_team_id !== null && a.away_team_id !== null && a.has_ended && (
               <Link className={`button button-small ${a.status === 'completed' ? 'button-outline' : 'button-primary'}`} to={`/games/${a.game_id}/score`}>
                 {a.status === 'completed' ? 'View result' : 'Enter result'}
               </Link>

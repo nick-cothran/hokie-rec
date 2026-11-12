@@ -8,11 +8,10 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 import os
 from contextlib import asynccontextmanager
 from datetime import date
-from datetime import date
 from typing import Annotated
 
 from database import db
-from admin import router as admin_router
+from admin import Admin, router as admin_router
 from auth import AuthenticatedUser, router as auth_router
 from incidents import router as incidents_router
 from scores import router as scores_router
@@ -178,11 +177,6 @@ def require_team_captain(team: dict, user: dict):
 def require_unlocked(team: dict):
     if team["roster_locked"]:
         raise HTTPException(409, f"The roster is locked (lock date {fmt_date(team['roster_lock_date'])}).")
-
-def require_admin(user: dict):
-    if user["role"] != "admin":
-        raise HTTPException(403, "Only administrators can do that.")
-
 
 @app.get("/api/health")
 def health():
@@ -477,7 +471,9 @@ def hand_off_captaincy(team_id: int, body: NewCaptain, user: AuthenticatedUser):
 GAME_COLUMNS = """
     g.game_id, g.league_id, l.league_name, g.start_time, g.end_time, f.facility_name, f.location,
     g.home_team_id, h.team_name AS home_team_name, g.away_team_id, a.team_name AS away_team_name,
-    g.playoff_round, g.next_game_id, g.status, s.home_score, s.away_score, s.forfeit_team_id
+    g.playoff_round, g.next_game_id, g.status, s.home_score, s.away_score, s.forfeit_team_id,
+    -- The league's bracket size, so a playoff round can be named (final, semifinal, ...)
+    (SELECT MAX(x.playoff_round) FROM Game x WHERE x.league_id = g.league_id) AS playoff_rounds
 """
 GAME_JOINS = """
     JOIN LeagueView l ON l.league_id = g.league_id
@@ -516,7 +512,7 @@ def my_games(user: AuthenticatedUser):
         """, {"user_id": user["user_id"]}).fetchall()
         recent = conn.execute(f"""
             SELECT {GAME_COLUMNS} FROM Game g {GAME_JOINS}
-            WHERE {membership} AND g.status = 'completed' AND g.end_time <= NOW()
+            WHERE {membership} AND g.status <> 'cancelled' AND g.end_time < NOW()
             ORDER BY g.start_time DESC, g.game_id DESC LIMIT 5
         """, {"user_id": user["user_id"]}).fetchall()
     return {"upcoming": upcoming, "recent": recent}
@@ -570,8 +566,7 @@ def decline_assignment(assignment_id: int, user: AuthenticatedUser):
     answer_assignment(assignment_id, user, "declined")
 
 @app.get("/api/admin/officials")
-def list_officials(user: AuthenticatedUser):
-    require_admin(user)
+def list_officials(user: Admin):
     with db() as conn:
         return conn.execute("""
             SELECT user_id, first_name, last_name, vt_pid
@@ -580,8 +575,7 @@ def list_officials(user: AuthenticatedUser):
         """).fetchall()
 
 @app.post("/api/admin/assignments", status_code=201)
-def create_assignment(body: NewAssignment, user: AuthenticatedUser):
-    require_admin(user)
+def create_assignment(body: NewAssignment, user: Admin):
     with db() as conn:
         game = conn.execute("""
             SELECT status, start_time > NOW() AS upcoming FROM Game WHERE game_id = %s
@@ -606,8 +600,7 @@ def create_assignment(body: NewAssignment, user: AuthenticatedUser):
         return assignment
 
 @app.get("/api/admin/players")
-def list_players(user: AuthenticatedUser, q: str = ""):
-    require_admin(user)
+def list_players(user: Admin, q: str = ""):
     search = f"%{q.strip()}%"
     with db() as conn:
         return conn.execute(f"""
@@ -615,14 +608,13 @@ def list_players(user: AuthenticatedUser, q: str = ""):
                    CASE WHEN suspended_until >= {LOCAL_TODAY} THEN suspended_until END AS suspended_until
             FROM Users
             WHERE role = 'player'
-              AND (%(q)s = '%%' OR vt_pid ILIKE %(q)s OR first_name ILIKE %(q)s OR last_name ILIKE %(q)s)
+              AND (vt_pid ILIKE %(q)s OR first_name ILIKE %(q)s OR last_name ILIKE %(q)s)
             ORDER BY last_name, first_name, user_id
             LIMIT 100
         """, {"q": search}).fetchall()
 
 @app.patch("/api/admin/players/{player_id}/suspension", status_code=204)
-def set_player_suspension(player_id: int, body: PlayerSuspension, user: AuthenticatedUser):
-    require_admin(user)
+def set_player_suspension(player_id: int, body: PlayerSuspension, user: Admin):
     with db() as conn:
         if body.suspended_until is not None:
             valid_date = conn.execute(f"SELECT %s >= {LOCAL_TODAY} AS valid", (body.suspended_until,)).fetchone()["valid"]

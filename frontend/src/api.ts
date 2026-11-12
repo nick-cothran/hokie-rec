@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 export type Role = 'player' | 'official' | 'admin'
+
+export const roleLabels: Record<Role, string> = { player: 'Player', official: 'Official', admin: 'Administrator' }
 
 export type User = { user_id: number; first_name: string; last_name: string; role: Role }
 
@@ -24,9 +26,6 @@ export type SignUpDetails = {
   password: string
 }
 
-// An administrator creates accounts with the same details plus a role
-export type NewAccountDetails = SignUpDetails & { role: Role }
-
 // One row of the administrator's account list (GET /api/admin/users)
 export type AdminUser = {
   user_id: number
@@ -39,8 +38,6 @@ export type AdminUser = {
   created_at: string
 }
 
-export type Health ={ status: string; version: string; database: string; leagues: number; teams: number }
-
 export type League = {
   league_id: number
   league_name: string
@@ -48,6 +45,7 @@ export type League = {
   category: string
   skill_level: string
   term: string
+  registration_open: boolean
   team_count: number
 }
 
@@ -102,11 +100,47 @@ export function formatDate(iso: string) {
   return new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+const CAMPUS_TIME_ZONE = 'America/New_York'
+
 // Game times are campus (Blacksburg) times, e.g. "Sat, Dec 5, 1:00 PM"
-export function formatGameTime(iso: string) {
+export function formatGameTime(iso: string, options: Intl.DateTimeFormatOptions = { weekday: 'short' }) {
   return new Date(iso).toLocaleString(undefined, {
-    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    timeZone: CAMPUS_TIME_ZONE, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...options,
   })
+}
+
+// The campus calendar day of an instant, e.g. "Jan 10, 2027"
+export function formatCampusDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, { timeZone: CAMPUS_TIME_ZONE, month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// Today's campus date as "YYYY-MM-DD", the format of a date input
+export function campusToday() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: CAMPUS_TIME_ZONE })
+}
+
+// How far campus wall-clock time is ahead of UTC at an instant, in ms (negative: -4 or -5 hours)
+function campusOffset(instant: number) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: CAMPUS_TIME_ZONE, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+  }).formatToParts(instant).map(p => [p.type, Number(p.value)]))
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute) - Math.floor(instant / 60000) * 60000
+}
+
+// A datetime-local value such as "2026-12-05T19:00", read as campus time whatever the device's zone.
+// Returns an Invalid Date for a blank or malformed value.
+export function campusTime(local: string) {
+  const [y, mo, d, h, mi] = local.split(/[-T:]/).map(Number)
+  const wall = Date.UTC(y, mo - 1, d, h, mi)
+  if (Number.isNaN(wall)) return new Date(NaN)
+  let instant = wall - campusOffset(wall)
+  instant = wall - campusOffset(instant)  // second pass settles days when daylight saving time changes
+  return new Date(instant)
+}
+
+// "Forfeit: <team that forfeited>", for a game or score report naming its forfeiting team
+export function forfeitLabel(g: { home_team_id: number | null; home_team_name: string | null; away_team_name: string | null }, forfeitTeamId: number) {
+  return `Forfeit: ${forfeitTeamId === g.home_team_id ? g.home_team_name : g.away_team_name}`
 }
 
 type ValidationIssue = { loc?: (string | number)[]; msg: string }
@@ -182,16 +216,16 @@ export function query(params: Record<string, string | number | null | undefined>
 export function useApi<T>(path: string | null) {
   const [version, setVersion] = useState(0)
   // `key` records which request the result belongs to, so loading is derived rather than stored
-  const [result, setResult] = useState<{ key: string; data?: T; error: string }>({ key: '', error: '' })
+  const [result, setResult] = useState<{ key: string; path: string | null; data?: T; error: string }>({ key: '', path: null, error: '' })
   const key = `${path}#${version}`
 
   useEffect(() => {
     if (path === null) return
     const controller = new AbortController()
     api<T>(path, { signal: controller.signal }).then(
-      data => setResult({ key, data, error: '' }),
+      data => setResult({ key, path, data, error: '' }),
       (e: Error) => {
-        if (!controller.signal.aborted) setResult(prev => ({ key, data: prev.data, error: e.message }))
+        if (!controller.signal.aborted) setResult(prev => ({ key, path, data: prev.path === path ? prev.data : undefined, error: e.message }))
       },
     )
     return () => controller.abort()
@@ -199,7 +233,8 @@ export function useApi<T>(path: string | null) {
 
   const reload = useCallback(() => setVersion(v => v + 1), [])
   const loading = path !== null && result.key !== key
-  return { data: result.data, error: loading ? '' : result.error, loading, reload }
+  // Data from another path (the previous team or league) is never shown; a reload keeps the current data meanwhile
+  return { data: result.path === path ? result.data : undefined, error: loading ? '' : result.error, loading, reload }
 }
 
 export type Standing = {
@@ -243,6 +278,7 @@ export type Game = {
   away_team_id: number | null
   away_team_name: string | null
   playoff_round: number | null
+  playoff_rounds: number | null
   next_game_id: number | null
   status: string
   home_score: number | null
@@ -256,6 +292,11 @@ export type MyGames = { upcoming: Game[]; recent: Game[] }
 export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean; has_ended: boolean }
 
 export type Facility = { facility_id: number; facility_name: string; location: string }
+
+// The round's name for a playoff game, '' for a regular-season game
+export function gameRound(g: Pick<Game, 'playoff_round' | 'playoff_rounds'>) {
+  return g.playoff_round === null || g.playoff_rounds === null ? '' : roundName(g.playoff_rounds - g.playoff_round + 1)
+}
 
 // "Final" for the last round, then "Semifinal", "Quarterfinal"; roundsLeft counts the final as 1
 export function roundName(roundsLeft: number) {

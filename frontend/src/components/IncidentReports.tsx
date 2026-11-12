@@ -1,14 +1,10 @@
 import '../styles/IncidentReports.css'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { api, formatDate, query, useApi, type AdminPlayer, type Assignment, type IncidentReport } from '../api'
+import { api, campusToday, formatDate, formatGameTime, query, useApi, type AdminPlayer, type Assignment, type IncidentReport } from '../api'
 import { useAuth } from '../auth'
 
-function when(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short',
-  })
-}
+const when = (iso: string) => formatGameTime(iso, { year: 'numeric' })
 
 function matchName(report: IncidentReport) {
   return `${report.home_team_name ?? 'TBD'} vs ${report.away_team_name ?? 'TBD'}`
@@ -162,16 +158,16 @@ function IncidentList({ reports, isAdmin, onDecided }: {
   )
 }
 
-function localDateAfter(days: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+// The campus date `days` from today as "YYYY-MM-DD"; the server checks suspensions against the campus date
+function campusDateAfter(days: number) {
+  const [y, m, d] = campusToday().split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10)
 }
 
 function PlayerSuspensions() {
   const [search, setSearch] = useState('')
   const [term, setTerm] = useState('')
-  const [suspendedUntil, setSuspendedUntil] = useState(() => localDateAfter(7))
+  const [suspendedUntil, setSuspendedUntil] = useState(() => campusDateAfter(7))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<number | null>(null)
   const players = useApi<AdminPlayer[]>(`/api/admin/players${query({ q: term })}`)
@@ -199,12 +195,14 @@ function PlayerSuspensions() {
         <label className="field">Find a player
           <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Name or VT PID" />
         </label>
-        <label className="field">Suspend through
-          <input type="date" min={localDateAfter(0)} value={suspendedUntil}
-            onChange={event => setSuspendedUntil(event.target.value)} required />
-        </label>
         <button className="button button-outline" type="submit">Search</button>
       </form>
+      <div className="filters">
+        <label className="field">Suspend through
+          <input type="date" min={campusToday()} value={suspendedUntil}
+            onChange={event => setSuspendedUntil(event.target.value)} />
+        </label>
+      </div>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {players.error && <p className="notice notice-error" role="alert">{players.error}</p>}
       {players.loading && !players.data && <p className="loading">Loading players…</p>}

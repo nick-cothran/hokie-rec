@@ -23,6 +23,7 @@ function RenameForm({ team, onSaved }: { team: Team; onSaved: (message: string) 
       onSaved(`Team renamed to “${saved.team_name}”.`)
     } catch (e) {
       setError((e as Error).message)
+    } finally {
       setSaving(false)
     }
   }
@@ -123,6 +124,7 @@ function TeamDetail() {
   const { data: team, error, loading, reload } = useApi<Team>(valid ? `/api/teams/${id}` : null)
   const [notice, setNotice] = useState<string>(location.state?.notice ?? '')
   const [actionError, setActionError] = useState('')
+  const [busy, setBusy] = useState(false)  // one roster action at a time, so a double click can't send two
 
   if (!valid || error === 'Team not found.') {
     return (
@@ -151,13 +153,16 @@ function TeamDetail() {
 
   // Runs a roster action after an optional confirm, then reloads the team
   async function run(path: string, method: string, success: string, confirmText?: string) {
-    if (confirmText && !window.confirm(confirmText)) return
+    if (busy || (confirmText && !window.confirm(confirmText))) return
+    setBusy(true)
     try {
       await api(path, { method })
       saved(success)
     } catch (e) {
       setNotice('')
       setActionError((e as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -215,9 +220,9 @@ function TeamDetail() {
               <h2>You're invited</h2>
               <p>{captain ? `${fullName(captain)} invited you` : 'You were invited'} to join {team.team_name}.{team.roster_locked ? ' The roster is locked, so you can only decline.' : ''}</p>
               <div className="form-row">
-                <button className="button button-primary" type="button" disabled={team.roster_locked || activeCount >= team.max_roster_size}
+                <button className="button button-primary" type="button" disabled={busy || team.roster_locked || activeCount >= team.max_roster_size}
                   onClick={() => run(`/api/teams/${team.team_id}/invite/accept`, 'POST', `You joined ${team.team_name}.`)}>Accept</button>
-                <button className="button button-outline" type="button"
+                <button className="button button-outline" type="button" disabled={busy}
                   onClick={() => run(`/api/teams/${team.team_id}/invite/decline`, 'POST', 'Invite declined.')}>Decline</button>
               </div>
             </section>
@@ -237,7 +242,7 @@ function TeamDetail() {
                 <p>Only the captain{captain ? `, ${fullName(captain)},` : ''} can rename this team or manage its roster.{user ? ` You're signed in as ${fullName(user)}.` : ''}</p>
                 {!user && <Link className="button button-outline" to={`/sign-in?next=/teams/${team.team_id}`}>Sign in</Link>}
                 {mine?.status === 'active' && (
-                  <button className="button button-danger" type="button" disabled={team.roster_locked}
+                  <button className="button button-danger" type="button" disabled={busy || team.roster_locked}
                     onClick={() => run(`/api/teams/${team.team_id}/leave`, 'POST', `You left ${team.team_name}.`,
                       `Leave ${team.team_name}?\n\nThe captain can invite you back before the roster locks.`)}>
                     {team.roster_locked ? 'Roster locked' : 'Leave team'}
@@ -265,10 +270,10 @@ function TeamDetail() {
                       {isCaptain && (
                         <td className="num">
                           {m.status === 'invited' && (
-                            <button className="button button-outline button-small" type="button" onClick={() => withdraw(m)}>Withdraw invite</button>
+                            <button className="button button-outline button-small" type="button" disabled={busy} onClick={() => withdraw(m)}>Withdraw invite</button>
                           )}
                           {m.status === 'active' && m.user_id !== team.captain_id && (
-                            <button className="button button-danger button-small" type="button" disabled={team.roster_locked} onClick={() => remove(m)}>Remove</button>
+                            <button className="button button-danger button-small" type="button" disabled={busy || team.roster_locked} onClick={() => remove(m)}>Remove</button>
                           )}
                         </td>
                       )}

@@ -15,7 +15,8 @@ function RegisterTeam() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const terms = [...new Set(leagues.data?.map(l => l.term))]
+  const open = leagues.data?.filter(l => l.registration_open) ?? []
+  const terms = [...new Set(open.map(l => l.term))]
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -51,12 +52,13 @@ function RegisterTeam() {
           {user && user.role !== 'player' && (
             <p className="notice notice-info">You're signed in as {fullName(user)}, who is {user.role === 'admin' ? 'an' : 'a'} {user.role}. Only players can register teams.</p>
           )}
+          {leagues.data && open.length === 0 && <p className="notice notice-info">No leagues are open for registration right now.</p>}
           <label className="field">League
             <select value={leagueId} onChange={e => setLeagueId(e.target.value)} required disabled={!leagues.data}>
               <option value="">{leagues.loading ? 'Loading leagues…' : 'Choose a league'}</option>
               {terms.map(term => (
                 <optgroup key={term} label={term}>
-                  {leagues.data?.filter(l => l.term === term).map(l => (
+                  {open.filter(l => l.term === term).map(l => (
                     <option key={l.league_id} value={l.league_id}>{l.league_name}</option>
                   ))}
                 </optgroup>
