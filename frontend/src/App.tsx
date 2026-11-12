@@ -15,6 +15,8 @@ import AdminUsers from './components/AdminUsers'
 import Resources from './components/Resources'
 import SignIn from './components/SignIn'
 import SignUp from './components/SignUp'
+import Profile from './components/Profile'
+import CreateGame from './components/CreateGame'
 import NotFound from './components/NotFound'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import AuthProvider from './AuthProvider'
@@ -40,6 +42,8 @@ function App() {
             <Route path="/resources" element={<Resources />} />
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/sign-up" element={<SignUp />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/admin/games/new" element={<CreateGame />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <Footer />

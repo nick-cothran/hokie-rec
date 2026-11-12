@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { api, ApiError, SESSION_EXPIRED_EVENT, type SignUpDetails, type User } from './api'
+import { api, ApiError, SESSION_EXPIRED_EVENT, type Profile, type ProfileDetails, type SignUpDetails, type User } from './api'
 import { AuthContext } from './auth'
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
@@ -52,5 +52,17 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     setError('')
   }
 
-  return <AuthContext value={{ user, loading, error, signIn, signUp, signOut }}>{children}</AuthContext>
+  async function updateProfile(details: ProfileDetails) {
+    const profile = await api<Profile>('/api/me/profile', {
+      method: 'PUT', body: JSON.stringify(details),
+    })
+    // Keep only the public session identity in context; contact details stay on the profile page.
+    setUser(current => current?.user_id === profile.user_id
+      ? { user_id: profile.user_id, first_name: profile.first_name, last_name: profile.last_name, role: profile.role }
+      : current)
+    setError('')
+    return profile
+  }
+
+  return <AuthContext value={{ user, loading, error, signIn, signUp, signOut, updateProfile }}>{children}</AuthContext>
 }

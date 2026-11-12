@@ -49,7 +49,7 @@ function SignUp() {
         {loading ? <p role="status">Checking your session…</p> : user ? (
           <div className="signin-form">
             <p>Signed in as <strong>{fullName(user)}</strong>. Sign out before creating another account.</p>
-            <Link className="button button-primary" to="/sign-in">Manage your account</Link>
+            <Link className="button button-primary" to="/profile">Manage your account</Link>
           </div>
         ) : (
           <>

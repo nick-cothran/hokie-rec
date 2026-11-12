@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { SignUpDetails, User } from './api'
+import type { Profile, ProfileDetails, SignUpDetails, User } from './api'
 
 type Auth = {
   user: User | null
@@ -8,6 +8,7 @@ type Auth = {
   signIn: (pid: string, password: string) => Promise<void>
   signUp: (details: SignUpDetails) => Promise<void>
   signOut: () => Promise<void>
+  updateProfile: (details: ProfileDetails) => Promise<Profile>
 }
 
 export const AuthContext = createContext<Auth | null>(null)

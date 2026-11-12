@@ -20,12 +20,12 @@ function Header() {
         <NavLink to="/teams">Teams</NavLink>
         <NavLink to="/schedule">Schedule</NavLink>
         <NavLink to="/reports">Reports</NavLink>
-        <NavLink to="/incidents">Incidents</NavLink>
+        {(user?.role === 'official' || user?.role === 'admin') && <NavLink to="/incidents">Incidents</NavLink>}
         <NavLink to="/resources">Resources</NavLink>
         {user?.role === 'admin' && <NavLink to="/admin/users">Admin</NavLink>}
       </nav>
 
-      <Link className="login-button" to="/sign-in">
+      <Link className="login-button" to={user ? '/profile' : '/sign-in'}>
         {loading ? 'Checking session…' : user ? `${user.first_name} ${user.last_name[0]}. · Account` : 'Sign in'}
       </Link>
     </header>

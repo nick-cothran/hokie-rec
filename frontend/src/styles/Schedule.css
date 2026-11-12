@@ -1,1 +1,5 @@
 .schedule-page .empty-state { margin-top: 2rem; }
+.personal-games { margin-bottom: 2rem; }
+.personal-games h3 { margin: 1.25rem 0 0.5rem; font-size: 1rem; }
+.personal-games-list a:not(.button) { color: var(--ink); text-decoration: none; }
+.personal-games-list a:hover { color: var(--orange-dark); text-decoration: underline; }

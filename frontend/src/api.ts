@@ -6,6 +6,15 @@ export type Role = 'player' | 'official' | 'admin'
 
 export type User = { user_id: number; first_name: string; last_name: string; role: Role }
 
+export type Profile = User & {
+  vt_pid: string
+  email: string
+  phone: string | null
+  created_at: string
+}
+
+export type ProfileDetails = Pick<Profile, 'first_name' | 'last_name' | 'email' | 'phone'>
+
 export type SignUpDetails = {
   vt_pid: string
   first_name: string
@@ -54,6 +63,8 @@ export type TeamSummary = {
   captain_last_name: string
   member_count: number
 }
+
+export type MyTeam = TeamSummary & { is_captain: boolean }
 
 export type RosterEntry = { user_id: number; first_name: string; last_name: string; status: string }
 
@@ -237,6 +248,8 @@ export type Game = {
   away_score: number | null
   forfeit_team_id: number | null
 }
+
+export type MyGames = { upcoming: Game[]; recent: Game[] }
 
 // One of the signed-in official's assignments (GET /api/me/assignments)
 export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean; has_ended: boolean }
