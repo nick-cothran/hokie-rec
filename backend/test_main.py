@@ -333,6 +333,57 @@ class RosterCase(TeamCase):
 
 
 class RosterTest(RosterCase):
+    def test_my_games_follow_membership_and_show_upcoming_and_recent(self):
+        other_team = self.register(name=self.name + 'b', user_id=self.third).json()['team_id']
+        facility = sql('SELECT MIN(facility_id) FROM Facility')[0][0]
+        game_ids = []
+        try:
+            for interval, status in (("3 years", 'scheduled'), ("-2 hours", 'completed')):
+                game_ids.append(sql("""
+                    INSERT INTO Game (league_id, facility_id, home_team_id, away_team_id, start_time, end_time, status)
+                    SELECT %s, %s, %s, %s, NOW() + %s::interval, NOW() + %s::interval + INTERVAL '1 hour', %s
+                    RETURNING game_id
+                """, (self.league_id, facility, self.team_id, other_team, interval, interval, status))[0][0])
+            sign_in(self.captain)
+            response = client.get('/api/me/games')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers['cache-control'], 'no-store')
+            self.assertIn(game_ids[0], [game['game_id'] for game in response.json()['upcoming']])
+            self.assertIn(game_ids[1], [game['game_id'] for game in response.json()['recent']])
+            self.assertEqual(self.invite_pid(self.other).status_code, 201)
+            sign_in(self.other)
+            self.assertNotIn(game_ids[0], [game['game_id'] for game in client.get('/api/me/games').json()['upcoming']])
+            self.assertEqual(self.accept(self.other).status_code, 204)
+            self.assertIn(game_ids[0], [game['game_id'] for game in client.get('/api/me/games').json()['upcoming']])
+            self.assertEqual(client.post(f'/api/teams/{self.team_id}/leave').status_code, 204)
+            self.assertNotIn(game_ids[0], [game['game_id'] for game in client.get('/api/me/games').json()['upcoming']])
+            client.cookies.clear()
+            self.assertEqual(client.get('/api/me/games').status_code, 401)
+        finally:
+            for game_id in game_ids:
+                sql('DELETE FROM Game WHERE game_id = %s', (game_id,))
+
+    def test_my_teams_tracks_active_membership_and_captain(self):
+        captain_rows = client.get('/api/me/teams')
+        self.assertEqual(captain_rows.status_code, 200)
+        self.assertEqual(captain_rows.headers['cache-control'], 'no-store')
+        team = next(row for row in captain_rows.json() if row['team_id'] == self.team_id)
+        self.assertTrue(team['is_captain'])
+        self.assertEqual(team['member_count'], 1)
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        sign_in(self.other)
+        self.assertNotIn(self.team_id, [row['team_id'] for row in client.get('/api/me/teams').json()])
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        team = next(row for row in client.get('/api/me/teams').json() if row['team_id'] == self.team_id)
+        self.assertFalse(team['is_captain'])
+        self.assertEqual(team['member_count'], 2)
+        self.assertEqual(client.post(f'/api/teams/{self.team_id}/leave').status_code, 204)
+        self.assertNotIn(self.team_id, [row['team_id'] for row in client.get('/api/me/teams').json()])
+
+    def test_my_teams_requires_authentication(self):
+        client.cookies.clear()
+        self.assertEqual(client.get('/api/me/teams').status_code, 401)
+
     def test_captain_invites_by_pid(self):
         r = self.invite_pid(self.other)
         self.assertEqual(r.status_code, 201)
@@ -1070,6 +1121,21 @@ class PasswordChangeTest(unittest.TestCase):
     def change(self, current=PASSWORD, new=NEW_PASSWORD):
         return client.post("/api/auth/password", json={"current_password": current, "new_password": new})
 
+    def test_password_verification_checks_current_password_and_requires_session(self):
+        original = sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0]
+        self.assertEqual(client.post('/api/auth/password/verify', json={'current_password': 'wrong'}).status_code, 400)
+        response = client.post('/api/auth/password/verify', json={'current_password': PASSWORD})
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        self.assertEqual(sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0], original)
+        client.cookies.clear()
+        self.assertEqual(client.post('/api/auth/password/verify', json={'current_password': PASSWORD}).status_code, 401)
+
+    def test_password_verification_shares_guess_limit_with_password_change(self):
+        for _ in range(10):
+            self.assertEqual(client.post('/api/auth/password/verify', json={'current_password': 'wrong'}).status_code, 400)
+        self.assertEqual(self.change().status_code, 429)
+
     def login(self, password):
         return client.post("/api/auth/login", json={"vt_pid": "simvt0002", "password": password})
 
@@ -1267,6 +1333,59 @@ class ReportTest(unittest.TestCase):
     def test_participation_without_term_lists_every_league(self):
         rows = client.get("/api/reports/participation").json()
         self.assertEqual(len(rows), len(client.get("/api/leagues").json()))
+
+
+class ScheduleCreationTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        self.admin = sql("SELECT user_id FROM Users WHERE role = 'admin' LIMIT 1")[0][0]
+        self.player = eligible_players(1)[0]
+        self.league, self.home, self.away = sql("""
+            SELECT a.league_id, a.team_id, b.team_id FROM Team a JOIN Team b
+            ON a.league_id = b.league_id AND a.team_id < b.team_id LIMIT 1
+        """)[0]
+        self.facility = sql("SELECT facility_id FROM Facility ORDER BY facility_id LIMIT 1")[0][0]
+        self.other_facility = sql("SELECT facility_id FROM Facility ORDER BY facility_id DESC LIMIT 1")[0][0]
+        self.start, self.end = sql("SELECT NOW() + INTERVAL '3 years', NOW() + INTERVAL '3 years 1 hour'")[0]
+        self.body = {"league_id": self.league, "facility_id": self.facility, "home_team_id": self.home,
+                     "away_team_id": self.away, "start_time": self.start.isoformat(), "end_time": self.end.isoformat()}
+        self.created = []
+        self.addCleanup(self.cleanup_games)
+        sign_in(self.admin)
+
+    def cleanup_games(self):
+        for game_id in self.created:
+            sql("DELETE FROM Game WHERE game_id = %s", (game_id,))
+
+    def create(self, **changes):
+        response = client.post('/api/admin/games', json={**self.body, **changes})
+        if response.status_code == 201:
+            self.created.append(response.json()['game_id'])
+        return response
+
+    def test_admin_creates_game_visible_on_schedule(self):
+        self.assertEqual(client.get('/api/admin/facilities').status_code, 200)
+        response = self.create()
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertIn(response.json()['game_id'], [g['game_id'] for g in client.get('/api/games', params={'league_id': self.league}).json()])
+
+    def test_overlapping_facility_and_team_are_rejected(self):
+        self.assertEqual(self.create().status_code, 201)
+        self.assertEqual(self.create().status_code, 409)
+        self.assertEqual(self.create(facility_id=self.other_facility).status_code, 409)
+
+    def test_invalid_teams_and_times_are_rejected(self):
+        self.assertEqual(self.create(away_team_id=self.home).status_code, 422)
+        self.assertEqual(self.create(end_time=self.start.isoformat()).status_code, 422)
+        self.assertEqual(self.create(start_time='2020-01-01T00:00:00Z', end_time='2020-01-01T01:00:00Z').status_code, 422)
+        self.assertEqual(self.create(start_time='2030-01-01T12:00:00', end_time='2030-01-01T13:00:00').status_code, 422)
+
+    def test_only_admins_can_schedule(self):
+        sign_in(self.player)
+        self.assertEqual(self.create().status_code, 403)
+        self.assertEqual(client.get('/api/admin/facilities').status_code, 403)
+        client.cookies.clear()
+        self.assertEqual(self.create().status_code, 401)
 
 
 class SchemaRulesTest(unittest.TestCase):

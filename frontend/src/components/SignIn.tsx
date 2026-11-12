@@ -45,6 +45,7 @@ function SignIn() {
         {loading ? <p role="status">Checking your session…</p> : user ? (
           <div className="signin-form">
             <p>Signed in as <strong>{fullName(user)}</strong> ({user.role}).</p>
+            <Link className="button button-primary" to="/profile">Edit profile</Link>
             <Link className="button button-primary" to="/teams">Go to teams</Link>
             {user.role === 'admin' && <Link className="button button-outline" to="/admin/users">Manage accounts</Link>}
             <button className="button button-outline" type="button" disabled={busy} onClick={logout}>{busy ? 'Signing out…' : 'Sign out'}</button>

@@ -15,6 +15,7 @@ from admin import router as admin_router
 from auth import AuthenticatedUser, router as auth_router
 from incidents import router as incidents_router
 from scores import router as scores_router
+from profiles import router as profiles_router
 
 
 @asynccontextmanager
@@ -30,6 +31,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(incidents_router)
 app.include_router(scores_router)
+app.include_router(profiles_router)
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 
 
@@ -42,7 +44,7 @@ async def protect_browser_requests(request: Request, call_next):
         if request.headers.get("x-requested-with") != "HokieRec" or (origin is not None and origin not in ALLOWED_ORIGINS):
             return JSONResponse(status_code=403, content={"detail": "Request could not be verified. Refresh the page and try again."})
     response = await call_next(request)
-    if request.url.path.startswith("/api/auth/"):
+    if request.url.path.startswith("/api/auth/") or request.url.path in ("/api/me/profile", "/api/me/teams", "/api/me/games"):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -234,6 +236,24 @@ def list_teams(league_id: int | None = None):
             GROUP BY t.team_id, l.league_id, l.league_name, l.sport_name, l.term, l.start_date, u.user_id
             ORDER BY l.start_date, l.league_name, t.team_name
         """, {"league_id": league_id}).fetchall()
+
+
+@app.get("/api/me/teams")
+def my_teams(user: AuthenticatedUser):
+    with db() as conn:
+        return conn.execute("""
+            SELECT t.team_id, t.team_name, t.status, l.league_id, l.league_name, l.sport_name, l.term,
+                   u.first_name AS captain_first_name, u.last_name AS captain_last_name,
+                   t.captain_id = %(user_id)s AS is_captain,
+                   COUNT(r.membership_id) FILTER (WHERE r.status = 'active') AS member_count
+            FROM Team t
+            JOIN RosterMembership mine ON mine.team_id = t.team_id AND mine.user_id = %(user_id)s AND mine.status = 'active'
+            JOIN LeagueView l ON l.league_id = t.league_id
+            JOIN Users u ON u.user_id = t.captain_id
+            LEFT JOIN RosterMembership r ON r.team_id = t.team_id
+            GROUP BY t.team_id, l.league_id, l.league_name, l.sport_name, l.term, l.start_date, u.user_id
+            ORDER BY l.start_date DESC, l.league_name, t.team_name
+        """, {"user_id": user["user_id"]}).fetchall()
 
 
 @app.get("/api/teams/{team_id}")
@@ -457,6 +477,28 @@ def list_games(league_id: int | None = None, team_id: int | None = None):
               AND (%(team_id)s::int IS NULL OR %(team_id)s IN (g.home_team_id, g.away_team_id))
             ORDER BY g.start_time, g.game_id
         """, {"league_id": league_id, "team_id": team_id}).fetchall()
+
+
+@app.get("/api/me/games")
+def my_games(user: AuthenticatedUser):
+    with db() as conn:
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        membership = """EXISTS (
+            SELECT 1 FROM RosterMembership r
+            WHERE r.user_id = %(user_id)s AND r.status = 'active'
+              AND r.team_id IN (g.home_team_id, g.away_team_id)
+        )"""
+        upcoming = conn.execute(f"""
+            SELECT {GAME_COLUMNS} FROM Game g {GAME_JOINS}
+            WHERE {membership} AND g.status = 'scheduled' AND g.end_time >= NOW()
+            ORDER BY g.start_time, g.game_id
+        """, {"user_id": user["user_id"]}).fetchall()
+        recent = conn.execute(f"""
+            SELECT {GAME_COLUMNS} FROM Game g {GAME_JOINS}
+            WHERE {membership} AND g.status = 'completed' AND g.end_time <= NOW()
+            ORDER BY g.start_time DESC, g.game_id DESC LIMIT 5
+        """, {"user_id": user["user_id"]}).fetchall()
+    return {"upcoming": upcoming, "recent": recent}
 
 
 # The signed-in official's assignments; anyone else has none

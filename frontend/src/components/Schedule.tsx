@@ -1,8 +1,8 @@
 import '../styles/Schedule.css'
 import '../styles/Teams.css'
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { api, formatGameTime as when, query, useApi, type Assignment, type Game, type League } from '../api'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { api, formatGameTime as when, query, useApi, type Assignment, type Game, type League, type MyGames } from '../api'
 import { useAuth } from '../auth'
 
 function result(g: Game) {
@@ -20,6 +20,34 @@ function round(g: Game) {
 
 function TeamLink({ id, name }: { id: number | null; name: string | null }) {
   return id === null ? <span>TBD</span> : <Link to={`/teams/${id}`}>{name}</Link>
+}
+
+function PersonalGameList({ games }: { games: Game[] }) {
+  return <ul className="invite-list personal-games-list">
+    {games.map(game => <li key={game.game_id}>
+      <div>
+        <strong><TeamLink id={game.home_team_id} name={game.home_team_name} /> vs <TeamLink id={game.away_team_id} name={game.away_team_name} /></strong>
+        <span className="invite-meta">{when(game.start_time)} · {game.facility_name} · {game.league_name}{round(game) ? ` · ${round(game)}` : ''}</span>
+      </div>
+      <span className="pill">{result(game)}</span>
+    </li>)}
+  </ul>
+}
+
+function YourGames() {
+  const games = useApi<MyGames>('/api/me/games')
+  return <section className="panel personal-games" aria-labelledby="your-games-heading">
+    <h2 id="your-games-heading">Your games</h2>
+    <p>Games for teams where you are currently an active player.</p>
+    {games.loading && <p role="status">Loading your games…</p>}
+    {games.error && <p className="notice notice-error" role="alert">{games.error}</p>}
+    {!games.loading && !games.error && games.data && <>
+      <h3>Upcoming and in progress</h3>
+      {games.data.upcoming.length ? <PersonalGameList games={games.data.upcoming} /> : <p>No upcoming games for your teams.</p>}
+      <h3>Recent results</h3>
+      {games.data.recent.length ? <PersonalGameList games={games.data.recent} /> : <p>No recent results for your teams.</p>}
+    </>}
+  </section>
 }
 
 // The signed-in official's games: accept or decline while pending and before kickoff
@@ -74,6 +102,7 @@ function Assignments() {
 
 function Schedule() {
   const { user } = useAuth()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const leagues = useApi<League[]>('/api/leagues')
   const leagueId = params.get('league') ?? String(leagues.data?.find(l => l.team_count > 0)?.league_id ?? '')
@@ -88,9 +117,14 @@ function Schedule() {
         </div>
       </div>
 
+      {location.state?.notice && <p className="notice notice-success" role="status">{location.state.notice}</p>}
+      {user?.role === 'admin' && <p><Link className="button button-primary" to="/admin/games/new">Schedule a game</Link></p>}
+
       {user?.role === 'official' && <Assignments />}
+      {user?.role === 'player' && <YourGames key={user.user_id} />}
 
       <section>
+        <h2>League schedule</h2>
         <form className="filters" onSubmit={e => e.preventDefault()}>
           <label className="field">League
             <select value={leagueId} onChange={e => setParams({ league: e.target.value }, { replace: true })}>

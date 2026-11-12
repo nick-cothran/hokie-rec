@@ -1,7 +1,7 @@
 import '../styles/Teams.css'
 import { useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { api, formatDate, query, useApi, type Invite, type League, type TeamSummary } from '../api'
+import { api, formatDate, query, useApi, type Invite, type League, type MyTeam, type TeamSummary } from '../api'
 import { useAuth } from '../auth'
 import TeamTable from './TeamTable'
 
@@ -25,11 +25,11 @@ function Invitations({ onAnswered }: { onAnswered: (message: string) => void }) 
     setBusy(false)
   }
 
-  if (!invites.data?.length && !error) return null
+  if (!invites.data?.length && !error && !invites.error) return null
   return (
     <section className="panel invitations" aria-labelledby="invitations-heading">
       <h2 id="invitations-heading">Your invitations</h2>
-      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {(error || invites.error) && <p className="notice notice-error" role="alert">{error || invites.error}</p>}
       <ul className="invite-list">
         {invites.data?.map(invite => {
           const full = invite.active_count >= invite.max_roster_size
@@ -56,10 +56,37 @@ function Invitations({ onAnswered }: { onAnswered: (message: string) => void }) 
   )
 }
 
+function YourTeams() {
+  const teams = useApi<MyTeam[]>('/api/me/teams')
+  return (
+    <section className="panel your-teams" aria-labelledby="your-teams-heading">
+      <h2 id="your-teams-heading">Your teams</h2>
+      {teams.loading && <p role="status">Loading your teams…</p>}
+      {teams.error && <p className="notice notice-error" role="alert">{teams.error}</p>}
+      {!teams.loading && !teams.error && teams.data?.length === 0 && <p>You aren't on a team yet. Browse the directory or register a team to get started.</p>}
+      {!teams.loading && !teams.error && !!teams.data?.length && (
+        <ul className="invite-list">
+          {teams.data.map(team => <li key={team.team_id}>
+            <div>
+              <Link className="text-link" to={`/teams/${team.team_id}`}><strong>{team.team_name}</strong></Link>{' '}
+              {team.is_captain && <span className="pill pill-captain">Captain</span>}
+              <span className="invite-meta">{team.league_name} · {team.member_count} active {team.member_count === 1 ? 'player' : 'players'}</span>
+            </div>
+            <Link className="button button-outline button-small" to={`/teams/${team.team_id}`}>View team</Link>
+          </li>)}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function Teams() {
+  const { user, loading } = useAuth()
+  const canRegister = !loading && (!user || user.role === 'player')
   const [params, setParams] = useSearchParams()
   const routeNotice: string | undefined = useLocation().state?.notice
   const [answered, setAnswered] = useState('')
+  const [membershipVersion, setMembershipVersion] = useState(0)
   const notice = answered || routeNotice
   const leagueId = params.get('league_id') ?? ''
 
@@ -72,11 +99,16 @@ function Teams() {
         <p className="eyebrow">Team directory</p>
         <div className="intro-row">
           <div><h1>Meet the teams.</h1><p>Open a team to see its roster. Captains can rename their team, invite players by PID and manage the roster.</p></div>
-          <Link className="button button-primary" to={`/teams/new${query({ league: leagueId })}`}>Register a team</Link>
+          {canRegister && <Link className="button button-primary" to={`/teams/new${query({ league: leagueId })}`}>Register a team</Link>}
         </div>
       </div>
 
-      <Invitations onAnswered={message => { setAnswered(message); teams.reload() }} />
+      {user?.role === 'player' && <>
+        <Invitations key={user.user_id} onAnswered={message => { setAnswered(message); setMembershipVersion(version => version + 1); teams.reload() }} />
+        <YourTeams key={`${user.user_id}-${membershipVersion}`} />
+      </>}
+
+      <h2>All teams</h2>
 
       <form className="filters" role="search" onSubmit={e => e.preventDefault()}>
         <label className="field">League
@@ -93,7 +125,7 @@ function Teams() {
       {teams.data && teams.data.length === 0 && (
         <section className="empty-state">
           <h2>No teams in this league yet</h2>
-          <Link className="text-link" to={`/teams/new${query({ league: leagueId })}`}>Register the first one <span aria-hidden="true">→</span></Link>
+          {canRegister && <Link className="text-link" to={`/teams/new${query({ league: leagueId })}`}>Register the first one <span aria-hidden="true">→</span></Link>}
         </section>
       )}
       {teams.data && teams.data.length > 0 && (

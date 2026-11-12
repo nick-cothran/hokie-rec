@@ -8,11 +8,12 @@ from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, EmailStr, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 from psycopg.errors import UniqueViolation
 from pwdlib import PasswordHash
 
 from database import db
+from account_details import Email, Name, Phone
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 password_hasher = PasswordHash.recommended()
@@ -33,16 +34,13 @@ class Login(BaseModel):
     password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
 
 
-Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50, pattern=r"^[^\x00-\x1f\x7f]+$")]
-
-
 class SignUp(Login):
     model_config = ConfigDict(extra="forbid")
 
     first_name: Name
     last_name: Name
-    email: Annotated[EmailStr, StringConstraints(max_length=100)]
-    phone: Annotated[str, StringConstraints(strip_whitespace=True, min_length=7, max_length=20, pattern=r"^[+0-9(). -]+$")]
+    email: Email
+    phone: Phone
     password: Annotated[str, StringConstraints(min_length=12, max_length=128)]
 
     @field_validator("vt_pid")
@@ -52,18 +50,6 @@ class SignUp(Login):
         if re.fullmatch(r"simvt\d+", pid):
             raise ValueError("This PID is reserved for a demo account. Sign in or choose another PID.")
         return pid
-
-    @field_validator("email")
-    @classmethod
-    def normalize_email(cls, value: str) -> str:
-        return value.lower()
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, value: str) -> str:
-        if len(re.sub(r"\D", "", value)) < 7:
-            raise ValueError("Enter a phone number with at least seven digits.")
-        return value
 
 
 class User(BaseModel):
@@ -203,16 +189,31 @@ class PasswordChange(BaseModel):
     new_password: Annotated[str, StringConstraints(min_length=12, max_length=128)]
 
 
+class PasswordVerification(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+def verify_current_password(user_id: int, current_password: str):
+    limit_attempts(f"password:{user_id}", LOGIN_LIMIT, "Too many password attempts. Try again in 15 minutes.")
+    with db() as conn:
+        stored = conn.execute("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (user_id,)).fetchone()
+    if stored is None or not password_hasher.verify(current_password, stored["password_hash"]):
+        raise HTTPException(400, "Your current password is incorrect.")
+
+
+@router.post("/password/verify", status_code=204)
+def verify_password(body: PasswordVerification, user: AuthenticatedUser):
+    verify_current_password(user["user_id"], body.current_password)
+    with db() as conn:
+        conn.execute("DELETE FROM AuthLoginAttempt WHERE identifier_hash = %s",
+                     (token_hash(f"password:{user['user_id']}"),))
+
+
 @router.post("/password", status_code=204)
 def change_password(body: PasswordChange, user: AuthenticatedUser, request: Request, response: Response):
     # A stolen session must not be able to guess the current password indefinitely.
-    limit_attempts(f"password:{user['user_id']}", LOGIN_LIMIT, "Too many password attempts. Try again in 15 minutes.")
-    with db() as conn:
-        stored = conn.execute("SELECT password_hash FROM UserCredentials WHERE user_id = %s",
-                              (user["user_id"],)).fetchone()
-    # 400, not 401: a wrong current password must not look like an expired session to the UI.
-    if stored is None or not password_hasher.verify(body.current_password, stored["password_hash"]):
-        raise HTTPException(400, "Your current password is incorrect.")
+    verify_current_password(user["user_id"], body.current_password)
     if body.new_password == body.current_password:
         raise HTTPException(400, "Choose a new password that is different from your current one.")
 

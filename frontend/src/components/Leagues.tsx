@@ -1,9 +1,11 @@
 import '../styles/Leagues.css'
 import { Link, useSearchParams } from 'react-router-dom'
 import { query, unique, useApi, type League } from '../api'
+import { useAuth } from '../auth'
 
 // S1: browse leagues by sport and term
 function Leagues() {
+  const { user, loading } = useAuth()
   const [params, setParams] = useSearchParams()
   const sport = params.get('sport') ?? ''
   const term = params.get('term') ?? ''
@@ -25,7 +27,7 @@ function Leagues() {
         <p className="eyebrow">League directory</p>
         <div className="intro-row">
           <div><h1>Find your league.</h1><p>Filter by sport and term, then open a league to see its teams.</p></div>
-          <Link className="button button-primary" to="/teams/new">Register a team</Link>
+          {!loading && (!user || user.role === 'player') && <Link className="button button-primary" to="/teams/new">Register a team</Link>}
         </div>
       </div>
 

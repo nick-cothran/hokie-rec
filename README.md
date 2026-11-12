@@ -20,6 +20,10 @@
 
    `migrate.py` brings an existing database up to date (authentication tables, roster rules, and the Phase III schema in `db/phase3.sql`) without losing data; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. The administrators are `simvt0133`–`simvt0135`; sign in as one and open **Admin** to create officials and other administrators. Anyone can change their password from **Account**. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
 
+   **Profile:** Open **Account** to edit your first name, last name, email, and optional phone number. Saved names appear immediately in the header and on rosters. PID and role are read-only; password changes remain available on the profile page. No additional migration or seeding is needed.
+
+   **Schedule a game:** Sign in as an administrator and open **Schedule → Schedule a game**. Choose two active teams in the same league, a facility, and future start/end times in your device's time zone. The application checks for overlapping team and facility bookings. This creates one regular-season game; assigning officials is a separate step.
+
 3. From `/backend` (venv active), run `uvicorn main:app --reload`. The terminal prints the DB connection on startup.
 4. Open http://localhost:8000/docs to try every endpoint in the browser.
 5. Tests: `python -m unittest` from `/backend`. They build a throwaway schema from `db/*.sql` inside the dev database and drop it afterwards, so your data is untouched.
@@ -43,13 +47,19 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | POST | `/api/auth/sign-up` | `{vt_pid, first_name, last_name, email, phone, password}` | anyone | Creates a player and signs in. 201 |
 | POST | `/api/auth/login` | `{vt_pid, password}` | anyone | 200 → user; 429 after 10 failed tries in 15 min |
 | GET | `/api/auth/me` | | signed in | Current user; 401 if not signed in |
+| GET | `/api/me/profile` | | signed in | Own PID, name, contact details, role and join date. Private; never returns credentials or disciplinary information |
+| PUT | `/api/me/profile` | `{first_name, last_name, email, phone}` | signed in | Updates only your own name/contact details. Send `phone: null` to remove it. 409 duplicate email; 422 invalid or extra fields. PID, role, and password cannot be changed here |
 | POST | `/api/auth/logout` | | anyone | 204 |
 | POST | `/api/auth/password` | `{current_password, new_password}` | signed in | New password 12–128 characters. 400 if the current password is wrong or unchanged; 429 after 10 wrong tries in 15 min. Signs out your other browsers and rotates this one's session. 204 |
+| POST | `/api/auth/password/verify` | `{current_password}` | signed in | Checks the current password for the first step of changing it; shares the password-change attempt limit. 204 |
 | GET | `/api/admin/users` | | admin | Every account: PID, name, email, role, `is_active`, `created_at` (never password hashes) |
 | POST | `/api/admin/users` | `{vt_pid, first_name, last_name, email, phone, role, password}` | admin | Creates a `player`, `official` or `admin` with an initial password (same rules as sign-up). The admin stays signed in. 409 duplicate PID/email. 201 → user |
+| GET | `/api/admin/facilities` | | admin | Facilities available for scheduling |
+| POST | `/api/admin/games` | `{league_id, facility_id, home_team_id, away_team_id, start_time, end_time}` | admin | Creates a regular-season game; times must include a time zone. 409 if a team or facility overlaps another game. 201 → `{game_id}` |
 | GET | `/api/health` | | anyone | `{status, version, database, leagues, teams}` |
 | GET | `/api/leagues` | `?sport=Soccer&term=Fall 2026` (both optional) | anyone | S1. Leagues with `team_count` |
 | GET | `/api/teams` | `?league_id=1` (optional) | anyone | Team directory with league, captain and `member_count` |
+| GET | `/api/me/teams` | | signed in | Teams where the current user is an active roster member, including whether they are captain |
 | POST | `/api/teams` | `{league_id, team_name}` | active player | S2. You become captain. 409 outside the registration window or if you're already on a team in that league. 201 → `{team_id}` |
 | GET | `/api/teams/{team_id}` | | anyone | Team, league roster limits (`min_roster_size`, `max_roster_size`, `roster_lock_date`, `roster_locked`) and `roster` |
 | PATCH | `/api/teams/{team_id}` | `{team_name}` | captain | S3. 200 → `{team_id, team_name}` |
@@ -63,6 +73,7 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | POST | `/api/teams/{team_id}/leave` | | active member | Leave before the lock date; the captain must hand off first. 204 |
 | PUT | `/api/teams/{team_id}/captain` | `{user_id}` | captain | Hand off to an active member, any time. 200 → `{team_id, captain_id}` |
 | GET | `/api/games` | `?league_id=1&team_id=4` (both optional) | anyone | Schedule and results, oldest first. Teams are null for an undecided playoff game; scores come from the game's newest score report |
+| GET | `/api/me/games` | | signed in | Upcoming/in-progress games and five most recent completed games for the current user's active teams |
 | GET | `/api/me/assignments` | | signed in | Your officiating assignments with game details, `assignment_status`, `can_respond` and `has_ended` (the game is over, so its result can be entered); `[]` for non-officials |
 | GET | `/api/games/{game_id}/score-reports` | | game's officials, admins | The game, every submitted report (newest is `is_current`), `can_submit` and `blocked_reason` |
 | POST | `/api/games/{game_id}/score-reports` | `{home_score, away_score}` or `{forfeit_team_id}` | assigned official | After the game's scheduled end, with both teams decided, unless you declined. A later report is a correction; earlier ones are kept. Marks the game `completed`. 201 |
