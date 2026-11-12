@@ -1,0 +1,9 @@
+.admin-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; min-width: 0; margin: 0 0 1rem; padding: 0; border: 0; }
+.admin-form-grid .field input, .admin-form-grid .field select { min-width: 0; }
+.admin-form-grid:disabled { opacity: 0.7; }
+.admin-form-actions { grid-column: 1 / -1; }
+.pill-role-official { background: #e8f0fb; color: #1d4f91; }
+.pill-role-admin { background: #172b4d; color: white; }
+.admin-users-page .data-table td { white-space: nowrap; }
+
+@media (max-width: 600px) { .admin-form-grid { grid-template-columns: 1fr; } }

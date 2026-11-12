@@ -18,7 +18,7 @@
    python seed_demo_accounts.py --development
    ```
 
-   `migrate.py` brings an existing database up to date (authentication tables, roster rules, and the Phase III schema in `db/phase3.sql`) without losing data; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
+   `migrate.py` brings an existing database up to date (authentication tables, roster rules, and the Phase III schema in `db/phase3.sql`) without losing data; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. The administrators are `simvt0133`–`simvt0135`; sign in as one and open **Admin** to create officials and other administrators. Anyone can change their password from **Account**. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
 
 3. From `/backend` (venv active), run `uvicorn main:app --reload`. The terminal prints the DB connection on startup.
 4. Open http://localhost:8000/docs to try every endpoint in the browser.
@@ -44,6 +44,9 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | POST | `/api/auth/login` | `{vt_pid, password}` | anyone | 200 → user; 429 after 10 failed tries in 15 min |
 | GET | `/api/auth/me` | | signed in | Current user; 401 if not signed in |
 | POST | `/api/auth/logout` | | anyone | 204 |
+| POST | `/api/auth/password` | `{current_password, new_password}` | signed in | New password 12–128 characters. 400 if the current password is wrong or unchanged; 429 after 10 wrong tries in 15 min. Signs out your other browsers and rotates this one's session. 204 |
+| GET | `/api/admin/users` | | admin | Every account: PID, name, email, role, `is_active`, `created_at` (never password hashes) |
+| POST | `/api/admin/users` | `{vt_pid, first_name, last_name, email, phone, role, password}` | admin | Creates a `player`, `official` or `admin` with an initial password (same rules as sign-up). The admin stays signed in. 409 duplicate PID/email. 201 → user |
 | GET | `/api/health` | | anyone | `{status, version, database, leagues, teams}` |
 | GET | `/api/leagues` | `?sport=Soccer&term=Fall 2026` (both optional) | anyone | S1. Leagues with `team_count` |
 | GET | `/api/teams` | `?league_id=1` (optional) | anyone | Team directory with league, captain and `member_count` |

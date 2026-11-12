@@ -11,6 +11,7 @@ import Schedule from './components/Schedule'
 import ScoreEntry from './components/ScoreEntry'
 import Reports from './components/Reports'
 import IncidentReports from './components/IncidentReports'
+import AdminUsers from './components/AdminUsers'
 import Resources from './components/Resources'
 import SignIn from './components/SignIn'
 import SignUp from './components/SignUp'
@@ -35,6 +36,7 @@ function App() {
             <Route path="/games/:gameId/score" element={<ScoreEntry />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/incidents" element={<IncidentReports />} />
+            <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/resources" element={<Resources />} />
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/sign-up" element={<SignUp />} />

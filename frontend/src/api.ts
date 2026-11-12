@@ -15,7 +15,22 @@ export type SignUpDetails = {
   password: string
 }
 
-export type Health = { status: string; version: string; database: string; leagues: number; teams: number }
+// An administrator creates accounts with the same details plus a role
+export type NewAccountDetails = SignUpDetails & { role: Role }
+
+// One row of the administrator's account list (GET /api/admin/users)
+export type AdminUser = {
+  user_id: number
+  vt_pid: string
+  first_name: string
+  last_name: string
+  email: string
+  role: Role
+  is_active: boolean
+  created_at: string
+}
+
+export type Health ={ status: string; version: string; database: string; leagues: number; teams: number }
 
 export type League = {
   league_id: number

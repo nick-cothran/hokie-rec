@@ -11,6 +11,7 @@ from datetime import date
 from typing import Annotated
 
 from database import db
+from admin import router as admin_router
 from auth import AuthenticatedUser, router as auth_router
 from incidents import router as incidents_router
 from scores import router as scores_router
@@ -26,6 +27,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(incidents_router)
 app.include_router(scores_router)
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]

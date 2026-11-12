@@ -22,6 +22,7 @@ function Header() {
         <NavLink to="/reports">Reports</NavLink>
         <NavLink to="/incidents">Incidents</NavLink>
         <NavLink to="/resources">Resources</NavLink>
+        {user?.role === 'admin' && <NavLink to="/admin/users">Admin</NavLink>}
       </nav>
 
       <Link className="login-button" to="/sign-in">
