@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { useApi, type Profile as AccountProfile, type ProfileDetails } from '../api'
+import { formatCampusDate, roleLabels, useApi, type Profile as AccountProfile, type ProfileDetails } from '../api'
 import { useAuth } from '../auth'
 import ChangePassword from './ChangePassword'
 import '../styles/SignIn.css'
@@ -148,8 +148,8 @@ export default function Profile() {
             <h2 id="account-details-heading">Account details</h2>
             <dl className="profile-account-details">
               <div><dt>PID</dt><dd>{profile.vt_pid}</dd></div>
-              <div><dt>Role</dt><dd>{profile.role === 'admin' ? 'Administrator' : profile.role === 'official' ? 'Official' : 'Player'}</dd></div>
-              <div><dt>Joined</dt><dd>{new Date(profile.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' })}</dd></div>
+              <div><dt>Role</dt><dd>{roleLabels[profile.role]}</dd></div>
+              <div><dt>Joined</dt><dd>{formatCampusDate(profile.created_at)}</dd></div>
             </dl>
             <p className="profile-account-help">Your PID and account role cannot be changed here.</p>
             <div className="form-row">

@@ -129,3 +129,20 @@ DROP TRIGGER IF EXISTS score_report_rules ON ScoreReport;
 CREATE TRIGGER score_report_rules
     BEFORE INSERT OR UPDATE ON ScoreReport
     FOR EACH ROW EXECUTE FUNCTION check_score_report();
+
+-- Allowed status values, and a score report must hold a result: a forfeit, or both scores
+-- (seeded forfeits also record a scoreline, so scores alongside a forfeit stay allowed).
+-- Dropped and re-added so a rerun applies any change to the lists.
+ALTER TABLE Team DROP CONSTRAINT IF EXISTS team_status_valid,
+    ADD CONSTRAINT team_status_valid CHECK (status IN ('active', 'inactive'));
+ALTER TABLE RosterMembership DROP CONSTRAINT IF EXISTS rostermembership_status_valid,
+    ADD CONSTRAINT rostermembership_status_valid CHECK (status IN ('invited', 'active', 'declined', 'removed', 'left'));
+ALTER TABLE Game DROP CONSTRAINT IF EXISTS game_status_valid,
+    ADD CONSTRAINT game_status_valid CHECK (status IN ('scheduled', 'completed', 'cancelled'));
+ALTER TABLE OfficiatingAssignment DROP CONSTRAINT IF EXISTS officiatingassignment_status_valid,
+    ADD CONSTRAINT officiatingassignment_status_valid CHECK (status IN ('assigned', 'accepted', 'declined', 'completed'));
+ALTER TABLE IncidentReport DROP CONSTRAINT IF EXISTS incidentreport_status_valid,
+    ADD CONSTRAINT incidentreport_status_valid CHECK (status IN ('open', 'reviewed', 'dismissed'));
+ALTER TABLE ScoreReport DROP CONSTRAINT IF EXISTS scorereport_has_result,
+    ADD CONSTRAINT scorereport_has_result CHECK ((home_score IS NULL) = (away_score IS NULL)
+                                                 AND (forfeit_team_id IS NOT NULL OR home_score IS NOT NULL));

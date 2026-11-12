@@ -17,9 +17,7 @@ def league_standings(conn, league_id: int) -> list[dict]:
             SELECT team_id, pf, pa,
                    CASE WHEN forfeit_team_id IS NOT NULL THEN CASE WHEN forfeit_team_id = team_id THEN 'L' ELSE 'W' END
                         WHEN pf > pa THEN 'W' WHEN pf < pa THEN 'L' ELSE 'T' END AS result
-            FROM sides
-            -- Skip a report with no forfeit and missing scores: there's no result to count
-            WHERE forfeit_team_id IS NOT NULL OR (pf IS NOT NULL AND pa IS NOT NULL)
+            FROM sides  -- every report holds a result (scorereport_has_result in db/phase3.sql)
         )
         SELECT t.team_id, t.team_name, t.status AS team_status,
                COUNT(r.result) AS played,

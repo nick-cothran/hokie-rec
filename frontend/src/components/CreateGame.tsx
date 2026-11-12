@@ -1,9 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, query, useApi, type League, type TeamSummary } from '../api'
+import { api, campusTime, query, useApi, type Facility, type League, type TeamSummary } from '../api'
 import { useAuth } from '../auth'
-
-type Facility = { facility_id: number; facility_name: string; location: string }
 
 export default function CreateGame() {
   const { user, loading } = useAuth()
@@ -25,7 +23,7 @@ export default function CreateGame() {
     event.preventDefault()
     if (busy) return
     setError('')
-    const startDate = new Date(start), endDate = new Date(end)
+    const startDate = campusTime(start), endDate = campusTime(end)
     if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime()) || endDate <= startDate) {
       setError('Choose a valid start time and an end time after it.')
       return
@@ -56,7 +54,7 @@ export default function CreateGame() {
         {league && teams.data && teams.data.filter(t => t.status === 'active').length < 2 && <p className="notice notice-info">This league needs at least two active teams to schedule a game.</p>}
         <label className="field">Facility<select value={facility} required disabled={busy || facilities.loading} onChange={e => setFacility(e.target.value)}><option value="">Choose a facility</option>{facilities.data?.map(f => <option key={f.facility_id} value={f.facility_id}>{f.facility_name} — {f.location}</option>)}</select></label>
         <label className="field">Start<input type="datetime-local" required value={start} disabled={busy} onChange={e => setStart(e.target.value)} /></label>
-        <label className="field">End<input type="datetime-local" required value={end} disabled={busy} onChange={e => setEnd(e.target.value)} /><small>Enter times in your device's time zone. The schedule displays Blacksburg time.</small></label>
+        <label className="field">End<input type="datetime-local" required value={end} disabled={busy} onChange={e => setEnd(e.target.value)} /><small>Enter Blacksburg (Eastern) times.</small></label>
         {error && <p className="notice notice-error" role="alert">{error}</p>}
         <div className="form-row"><button className="button button-primary" disabled={busy || !league || !home || !away || !facility || !start || !end}>{busy ? 'Scheduling…' : 'Schedule game'}</button><Link className="button button-outline" to="/schedule">Cancel</Link></div>
       </form>

@@ -1,7 +1,7 @@
 import '../styles/Playoffs.css'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { api, formatGameTime as when, query, roundName, useApi, type Facility, type Game, type Standing } from '../api'
+import { api, campusTime, formatGameTime as when, query, roundName, useApi, type Facility, type Game, type Standing } from '../api'
 import { useAuth } from '../auth'
 
 const record = (t?: Standing) => t ? `${t.wins}–${t.losses}${t.ties ? `–${t.ties}` : ''}` : ''
@@ -94,7 +94,7 @@ function GenerateBracket({ leagueId, onDone }: { leagueId: number; onDone: (mess
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
-    const startDate = new Date(start)
+    const startDate = campusTime(start)
     if (!Number.isFinite(startDate.getTime())) { setError('Choose a start time.'); return }
     setBusy(true)
     setError('')
@@ -130,7 +130,7 @@ function GenerateBracket({ leagueId, onDone }: { leagueId: number; onDone: (mess
         </label>
         <label className="field">First round starts
           <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} required disabled={busy} />
-          <small>First-round games run back to back from this time, in your device's time zone.</small>
+          <small>First-round games run back to back from this time, in Blacksburg (Eastern) time.</small>
         </label>
         <label className="field">Days between rounds
           <input type="number" min={1} max={14} step={1} value={gap} onChange={e => setGap(e.target.value)} required disabled={busy} />

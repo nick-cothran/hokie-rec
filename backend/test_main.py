@@ -338,7 +338,8 @@ class RosterTest(RosterCase):
         facility = sql('SELECT MIN(facility_id) FROM Facility')[0][0]
         game_ids = []
         try:
-            for interval, status in (("3 years", 'scheduled'), ("-2 hours", 'completed')):
+            # The third game has ended but has no result yet; it still belongs in "recent"
+            for interval, status in (("3 years", 'scheduled'), ("-2 hours", 'completed'), ("-5 hours", 'scheduled')):
                 game_ids.append(sql("""
                     INSERT INTO Game (league_id, facility_id, home_team_id, away_team_id, start_time, end_time, status)
                     SELECT %s, %s, %s, %s, NOW() + %s::interval, NOW() + %s::interval + INTERVAL '1 hour', %s
@@ -350,6 +351,7 @@ class RosterTest(RosterCase):
             self.assertEqual(response.headers['cache-control'], 'no-store')
             self.assertIn(game_ids[0], [game['game_id'] for game in response.json()['upcoming']])
             self.assertIn(game_ids[1], [game['game_id'] for game in response.json()['recent']])
+            self.assertIn(game_ids[2], [game['game_id'] for game in response.json()['recent']])
             self.assertEqual(self.invite_pid(self.other).status_code, 201)
             sign_in(self.other)
             self.assertNotIn(game_ids[0], [game['game_id'] for game in client.get('/api/me/games').json()['upcoming']])
@@ -680,6 +682,11 @@ class GamesTest(unittest.TestCase):
         game = next(g for g in client.get(f"/api/games?league_id={league_id}").json() if g["game_id"] == game_id)
         self.assertIsNone(game["home_team_name"])
         self.assertIsNotNone(game["playoff_round"])
+
+    def test_games_carry_their_league_playoff_round_count(self):
+        league_id, rounds = sql("SELECT league_id, MAX(playoff_round) FROM Game WHERE playoff_round IS NOT NULL GROUP BY 1 LIMIT 1")[0]
+        games = client.get(f"/api/games?league_id={league_id}").json()
+        self.assertEqual({g["playoff_rounds"] for g in games}, {rounds})
 
 
 class AssignmentTest(unittest.TestCase):
@@ -1343,25 +1350,6 @@ class ReportTest(unittest.TestCase):
         for team_id, n in forfeits:
             self.assertGreaterEqual(rows[team_id]["losses"], n)
 
-    def test_standings_skips_incomplete_latest_report(self):
-        def played():
-            rows = client.get("/api/reports/standings", params={"league_id": self.league_id}).json()
-            return sum(t["played"] for t in rows), sum(t["ties"] for t in rows)
-
-        before = played()
-        game_id, official = sql("""
-            SELECT g.game_id, oa.official_id FROM Game g JOIN OfficiatingAssignment oa ON oa.game_id = g.game_id
-            WHERE g.league_id = %s AND g.status = 'completed' LIMIT 1""", (self.league_id,))[0]
-        # A newer report wins, so one with no scores and no forfeit hides the game's real result
-        report_id = sql("""INSERT INTO ScoreReport (game_id, submitted_by, submitted_at)
-                           VALUES (%s, %s, NOW()) RETURNING report_id""", (game_id, official))[0][0]
-        try:
-            after = played()
-            self.assertEqual(after[0], before[0] - 2)
-            self.assertLessEqual(after[1], before[1])
-        finally:
-            sql("DELETE FROM ScoreReport WHERE report_id = %s", (report_id,))
-
     def test_standings_unknown_league_is_404(self):
         self.assertEqual(client.get("/api/reports/standings", params={"league_id": 999999}).status_code, 404)
 
@@ -1514,6 +1502,22 @@ class SchemaRulesTest(unittest.TestCase):
         self.assertRejected("scorereport_no_edits",
                             ("UPDATE ScoreReport SET home_score = home_score + 1 WHERE game_id = %s", (self.game_id,)))
 
+    def test_statuses_are_limited_to_known_values(self):
+        for table, key, value in [("Team", "team_id", self.home), ("RosterMembership", "team_id", self.home),
+                                  ("Game", "game_id", self.game_id), ("OfficiatingAssignment", "game_id", self.game_id)]:
+            with self.subTest(table=table):
+                self.assertRejected(f"{table.lower()}_status_valid",
+                                    (f"UPDATE {table} SET status = 'canceled' WHERE {key} = %s", (value,)))
+        self.assertRejected("incidentreport_status_valid", ("""
+            INSERT INTO IncidentReport (game_id, filed_by, incident_type, description, status)
+            VALUES (%s, %s, 'conduct', 'Test', 'closed')""", (self.game_id, self.official)))
+
+    def test_score_report_needs_a_result(self):
+        insert = ("INSERT INTO ScoreReport (game_id, submitted_by, home_score, away_score) VALUES (%s, %s, %s, %s)")
+        for home, away in [(None, None), (2, None)]:
+            with self.subTest(home=home, away=away):
+                self.assertRejected("scorereport_has_result", (insert, (self.game_id, self.official, home, away)))
+
     def test_game_teams_belong_to_its_league(self):
         outsider = sql("SELECT team_id FROM Team WHERE league_id <> (SELECT league_id FROM Game WHERE game_id = %s) LIMIT 1",
                        (self.game_id,))[0][0]
@@ -1521,7 +1525,7 @@ class SchemaRulesTest(unittest.TestCase):
                             ("UPDATE Game SET away_team_id = %s WHERE game_id = %s", (outsider, self.game_id)))
 
     def test_assignment_roles(self):
-        assign = "INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status) VALUES (%s, %s, %s, 'referee', 'pending')"
+        assign = "INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status) VALUES (%s, %s, %s, 'referee', 'assigned')"
         self.run_sql((assign, (self.game_id, self.other_official, self.admin)))
         self.assertRejected("assignment_official_role", (assign, (self.game_id, self.player, self.admin)))
         self.assertRejected("assignment_by_admin", (assign, (self.game_id, self.other_official, self.official)))

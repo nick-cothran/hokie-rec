@@ -1,15 +1,11 @@
 import '../styles/AdminUsers.css'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { api, useApi, type AdminUser, type Role, type User } from '../api'
+import { api, formatCampusDate, roleLabels, useApi, type AdminUser, type Role, type User } from '../api'
 import { fullName, useAuth } from '../auth'
 
-const ROLES: { value: Role; label: string }[] = [
-  { value: 'player', label: 'Player' },
-  { value: 'official', label: 'Official' },
-  { value: 'admin', label: 'Administrator' },
-]
-const roleLabel = (role: Role) => ROLES.find(r => r.value === role)?.label ?? role
+const ROLES = Object.entries(roleLabels).map(([value, label]) => ({ value, label }))
+const roleLabel = (role: Role) => roleLabels[role] ?? role
 
 // An administrator creates a player, official or administrator with an initial password
 function CreateAccount({ onCreated }: { onCreated: (message: string) => void }) {
@@ -148,7 +144,7 @@ function AdminUsers() {
                         <td>{u.email}</td>
                         <td><span className={`pill pill-role-${u.role}`}>{roleLabel(u.role)}</span></td>
                         <td>{u.is_active ? 'Active' : 'Inactive'}</td>
-                        <td>{new Date(u.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</td>
+                        <td>{formatCampusDate(u.created_at)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/admin", tags=["Administration"])
 
 def require_admin(user: Annotated[dict, Depends(current_user)]) -> dict:
     if user["role"] != "admin":
-        raise HTTPException(403, "Only administrators can manage accounts.")
+        raise HTTPException(403, "Only administrators can do that.")
     return user
 
 
