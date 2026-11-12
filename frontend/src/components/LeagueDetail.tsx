@@ -2,6 +2,7 @@ import '../styles/LeagueDetail.css'
 import { Link, useParams } from 'react-router-dom'
 import { query, useApi, type League, type TeamSummary } from '../api'
 import TeamTable from './TeamTable'
+import Playoffs from './Playoffs'
 import { useAuth } from '../auth'
 
 function LeagueDetail() {
@@ -59,6 +60,7 @@ function LeagueDetail() {
             )}
             {teams.data && teams.data.length > 0 && <TeamTable teams={teams.data} showLeague={false} />}
           </section>
+          <Playoffs leagueId={id} />
         </div>
       )}
     </main>

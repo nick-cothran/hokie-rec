@@ -17,6 +17,8 @@ from auth import AuthenticatedUser, router as auth_router
 from incidents import router as incidents_router
 from scores import router as scores_router
 from profiles import router as profiles_router
+from playoffs import router as playoffs_router
+from standings import league_standings
 
 
 @asynccontextmanager
@@ -33,6 +35,7 @@ app.include_router(admin_router)
 app.include_router(incidents_router)
 app.include_router(scores_router)
 app.include_router(profiles_router)
+app.include_router(playoffs_router)
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 
 
@@ -640,36 +643,7 @@ def standings(league_id: int):
     with db() as conn:
         if not conn.execute("SELECT 1 FROM League WHERE league_id = %s", (league_id,)).fetchone():
             raise HTTPException(404, "League not found.")
-        return conn.execute("""
-            WITH sides AS (
-                SELECT g.home_team_id AS team_id, s.home_score AS pf, s.away_score AS pa, s.forfeit_team_id
-                FROM Game g JOIN LatestScoreReport s ON s.game_id = g.game_id
-                WHERE g.league_id = %(league_id)s AND g.playoff_round IS NULL
-                UNION ALL
-                SELECT g.away_team_id, s.away_score, s.home_score, s.forfeit_team_id
-                FROM Game g JOIN LatestScoreReport s ON s.game_id = g.game_id
-                WHERE g.league_id = %(league_id)s AND g.playoff_round IS NULL
-            ), results AS (
-                SELECT team_id, pf, pa,
-                       CASE WHEN forfeit_team_id IS NOT NULL THEN CASE WHEN forfeit_team_id = team_id THEN 'L' ELSE 'W' END
-                            WHEN pf > pa THEN 'W' WHEN pf < pa THEN 'L' ELSE 'T' END AS result
-                FROM sides
-                -- Skip a report with no forfeit and missing scores: there's no result to count
-                WHERE forfeit_team_id IS NOT NULL OR (pf IS NOT NULL AND pa IS NOT NULL)
-            )
-            SELECT t.team_id, t.team_name,
-                   COUNT(r.result) AS played,
-                   COUNT(*) FILTER (WHERE r.result = 'W') AS wins,
-                   COUNT(*) FILTER (WHERE r.result = 'L') AS losses,
-                   COUNT(*) FILTER (WHERE r.result = 'T') AS ties,
-                   COALESCE(SUM(r.pf), 0) AS points_for,
-                   COALESCE(SUM(r.pa), 0) AS points_against,
-                   COALESCE(SUM(r.pf), 0) - COALESCE(SUM(r.pa), 0) AS point_diff
-            FROM Team t LEFT JOIN results r ON r.team_id = t.team_id
-            WHERE t.league_id = %(league_id)s
-            GROUP BY t.team_id
-            ORDER BY wins DESC, point_diff DESC, t.team_name
-        """, {"league_id": league_id}).fetchall()
+        return league_standings(conn, league_id)
 
 
 # Report 2: per-league participation and progress, optionally for one term

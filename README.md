@@ -33,6 +33,7 @@
    - **Register a team:** six Spring 2027 leagues (one per Fall sport) opened registration on Nov 1. Sign in as any player, e.g. `simvt0001`.
    - **Enter a result:** the Fall semifinals (Oct 19–24) are over but unscored. Sign in as an official, e.g. `simvt0121`, open **Schedule** and click **Enter result** on a semifinal. Submitting again records a correction; the history keeps every report.
    - **Accept or decline an assignment:** the Fall championship games are on Dec 5–6. As the same official, use **Accept** / **Decline** on the final.
+   - **Playoffs:** each Fall league page shows its bracket. After a semifinal result is entered, the winner appears in the final. To generate a bracket, sign in as an admin (`simvt0133`), open a Fall league, click **Remove bracket** (allowed while no playoff game has a result), then pick the bracket size, facility and start time and click **Generate bracket**. Teams are seeded from the standings (1 vs 4, 2 vs 3).
 
    After pulling a seed change, rebuild your local database so you get the new dates: `docker compose down -v`, then repeat steps 1–2 (this deletes local data).
 
@@ -56,6 +57,8 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | POST | `/api/admin/users` | `{vt_pid, first_name, last_name, email, phone, role, password}` | admin | Creates a `player`, `official` or `admin` with an initial password (same rules as sign-up). The admin stays signed in. 409 duplicate PID/email. 201 → user |
 | GET | `/api/admin/facilities` | | admin | Facilities available for scheduling |
 | POST | `/api/admin/games` | `{league_id, facility_id, home_team_id, away_team_id, start_time, end_time}` | admin | Creates a regular-season game; times must include a time zone. 409 if a team or facility overlaps another game. 201 → `{game_id}` |
+| POST | `/api/admin/leagues/{league_id}/playoffs` | `{team_count: 2\|4\|8, facility_id, start_time, days_between_rounds?}` | admin | Generates a single-elimination bracket from the regular-season standings (1 vs N, …; higher seed at home). Round 1 runs back to back on the facility from `start_time` (game length = the league's usual regular-season length, 30 min turnover); later rounds follow every `days_between_rounds` days (default 7) with teams TBD. 409 if the league already has a bracket, a regular-season game has no result, there are too few active teams, or the facility/a team is booked. 201 → `{seeds, games}` |
+| DELETE | `/api/admin/leagues/{league_id}/playoffs` | | admin | Removes a bracket before any playoff result is entered (its assignments go too). 409 once a result exists. 204 |
 | GET | `/api/health` | | anyone | `{status, version, database, leagues, teams}` |
 | GET | `/api/leagues` | `?sport=Soccer&term=Fall 2026` (both optional) | anyone | S1. Leagues with `team_count` |
 | GET | `/api/teams` | `?league_id=1` (optional) | anyone | Team directory with league, captain and `member_count` |
@@ -76,7 +79,7 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | GET | `/api/me/games` | | signed in | Upcoming/in-progress games and five most recent completed games for the current user's active teams |
 | GET | `/api/me/assignments` | | signed in | Your officiating assignments with game details, `assignment_status`, `can_respond` and `has_ended` (the game is over, so its result can be entered); `[]` for non-officials |
 | GET | `/api/games/{game_id}/score-reports` | | game's officials, admins | The game, every submitted report (newest is `is_current`), `can_submit` and `blocked_reason` |
-| POST | `/api/games/{game_id}/score-reports` | `{home_score, away_score}` or `{forfeit_team_id}` | assigned official | After the game's scheduled end, with both teams decided, unless you declined. A later report is a correction; earlier ones are kept. Marks the game `completed`. 201 |
+| POST | `/api/games/{game_id}/score-reports` | `{home_score, away_score}` or `{forfeit_team_id}` | assigned official | After the game's scheduled end, with both teams decided, unless you declined. A later report is a correction; earlier ones are kept. Marks the game `completed`. A playoff game can't end in a tie; its winner (or a forfeit's opponent) moves into the next game: the feeder that starts first fills the home slot. A correction can change who advanced only until the next game has a result (409). 201 |
 | POST | `/api/assignments/{assignment_id}/accept` | | assigned official | Only while `assigned` and before the game starts. 404 if it isn't yours; 409 if already answered or started. 204 |
 | POST | `/api/assignments/{assignment_id}/decline` | | assigned official | Same rules as accept. A declined official can't submit the game's score. 204 |
 | GET | `/api/incidents` | | official or admin | Private reports: an official sees reports they filed; admins see all reports |

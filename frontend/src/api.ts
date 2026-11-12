@@ -205,6 +205,7 @@ export function useApi<T>(path: string | null) {
 export type Standing = {
   team_id: number
   team_name: string
+  team_status: string
   played: number
   wins: number
   losses: number
@@ -253,6 +254,13 @@ export type MyGames = { upcoming: Game[]; recent: Game[] }
 
 // One of the signed-in official's assignments (GET /api/me/assignments)
 export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean; has_ended: boolean }
+
+export type Facility = { facility_id: number; facility_name: string; location: string }
+
+// "Final" for the last round, then "Semifinal", "Quarterfinal"; roundsLeft counts the final as 1
+export function roundName(roundsLeft: number) {
+  return roundsLeft === 1 ? 'Final' : roundsLeft === 2 ? 'Semifinal' : roundsLeft === 3 ? 'Quarterfinal' : `Round of ${2 ** roundsLeft}`
+}
 
 export type Official = { user_id: number; first_name: string; last_name: string; vt_pid: string }
 
@@ -321,6 +329,8 @@ export type ScoreSheet = {
     facility_name: string
     location: string
     has_ended: boolean
+    playoff_round: number | null
+    next_game_id: number | null
   }
   reports: ScoreReport[]
   can_submit: boolean

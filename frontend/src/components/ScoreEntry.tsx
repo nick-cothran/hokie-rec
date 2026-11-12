@@ -140,6 +140,9 @@ function ScoreEntry() {
 
           <section className="panel" aria-labelledby="enter-result-heading">
             <h2 id="enter-result-heading">{current ? 'Correct the result' : 'Enter the result'}</h2>
+            {game.playoff_round !== null && sheet.data.can_submit && (
+              <p className="result-count">Playoff game: enter the score after any tiebreaker. {game.next_game_id !== null && 'The winner moves on to the next round.'}</p>
+            )}
             {sheet.data.can_submit
               ? <ResultForm game={game} correcting={!!current} onSaved={message => { setNotice(message); sheet.reload() }} />
               : <p className="notice notice-info">{sheet.data.blocked_reason}</p>}

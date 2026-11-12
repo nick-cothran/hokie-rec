@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from auth import AuthenticatedUser
 from database import db
+from playoffs import advance_winner, playoff_winner
 
 router = APIRouter(prefix="/api/games", tags=["Score reports"])
 Score = Annotated[int, Field(strict=True, ge=0, le=2_147_483_647)]
@@ -33,6 +34,7 @@ class NewScoreReport(BaseModel):
 def game_details(conn, game_id: int, *, lock: bool = False) -> dict:
     game = conn.execute(f"""
         SELECT g.game_id, g.league_id, l.league_name, g.status, g.start_time, g.end_time,
+               g.playoff_round, g.next_game_id,
                g.home_team_id, h.team_name AS home_team_name,
                g.away_team_id, a.team_name AS away_team_name,
                f.facility_name, f.location, g.end_time <= clock_timestamp() AS has_ended
@@ -105,6 +107,12 @@ def submit_score_report(game_id: int, body: NewScoreReport, user: AuthenticatedU
             raise HTTPException(403 if assignment is None or assignment["status"] == "declined" else 409, reason)
         if body.forfeit_team_id is not None and body.forfeit_team_id not in (game["home_team_id"], game["away_team_id"]):
             raise HTTPException(422, "The forfeiting team must be one of this game's two teams.")
+        if game["playoff_round"] is not None:
+            winner = playoff_winner(game, body.home_score, body.away_score, body.forfeit_team_id)
+            if winner is None:
+                raise HTTPException(422, "A playoff game needs a winner. Enter the score after the tiebreaker.")
+            if game["next_game_id"] is not None:
+                advance_winner(conn, game, winner)
         report = conn.execute("""
             INSERT INTO ScoreReport (game_id, submitted_by, home_score, away_score, forfeit_team_id, submitted_at)
             VALUES (%s, %s, %s, %s, %s, clock_timestamp())
