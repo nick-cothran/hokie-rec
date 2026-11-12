@@ -1,0 +1,8 @@
+.result-mode { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin: 0; padding: 0; border: 0; }
+.result-mode legend { margin-bottom: 0.5rem; padding: 0; color: var(--ink-soft); font-size: 0.8rem; font-weight: 700; }
+.result-mode label { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.92rem; cursor: pointer; }
+.score-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.score-inputs .field input { min-width: 0; font-size: 1.25rem; font-weight: 700; }
+.current-result { margin: 0; color: var(--ink); font-size: 1.35rem; font-weight: 750; }
+
+@media (max-width: 500px) { .score-inputs { grid-template-columns: 1fr; } }

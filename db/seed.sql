@@ -8,9 +8,12 @@
 -- The script is intentionally NOT idempotent. Reset the development database
 -- before running it again; it does not delete any existing rows.
 --
--- Six active Fall 2026 leagues are played through their regular seasons.
--- Fourteen Spring 2027 leagues are catalog entries not yet open for registration.
--- All six fall leagues have scheduled semifinal and championship games.
+-- Six active Fall 2026 leagues have finished their regular seasons. Their semifinals
+-- (Oct 19-24) have been played but not yet scored, so assigned officials can enter
+-- results in the app; championship games are scheduled for Dec 5-6, so officials can
+-- still accept or decline those assignments.
+-- Six Spring 2027 leagues (one per Fall sport) opened registration on Nov 1; the other
+-- eight open Dec 1. All Spring rosters lock Jan 24.
 -- ScoreReport has no confirmation fields in the supplied schema, so reports
 -- are only submitted results; no approval/confirmation state is invented.
 
@@ -33,21 +36,21 @@ INSERT INTO League (sport_id, category, skill_level, term, start_date, end_date,
 SELECT (SELECT sport_id FROM Sport WHERE sport_name = seed.sport_name), seed.category, seed.skill_level, seed.term, seed.start_date::date, seed.end_date::date,
        seed.reg_open_at::timestamptz, seed.reg_close_at::timestamptz, seed.roster_lock_date::date
 FROM (VALUES
-    ('Soccer', 'Coed', 'Recreational', 'Fall 2026', '2026-08-31', '2026-10-31', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
-    ('Basketball', 'Open', 'Competitive', 'Fall 2026', '2026-08-31', '2026-10-31', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
-    ('Volleyball', 'Coed', 'Recreational', 'Fall 2026', '2026-08-31', '2026-10-31', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
-    ('Flag Football', 'Open', 'Intermediate', 'Fall 2026', '2026-08-31', '2026-10-31', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
-    ('Ultimate Frisbee', 'Coed', 'Recreational', 'Fall 2026', '2026-08-31', '2026-10-31', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
-    ('Dodgeball', 'Open', 'Recreational', 'Fall 2026', '2026-08-31', '2026-10-31', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
-    ('Soccer', 'Coed', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
+    ('Soccer', 'Coed', 'Recreational', 'Fall 2026', '2026-08-31', '2026-12-06', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
+    ('Basketball', 'Open', 'Competitive', 'Fall 2026', '2026-08-31', '2026-12-06', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
+    ('Volleyball', 'Coed', 'Recreational', 'Fall 2026', '2026-08-31', '2026-12-06', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
+    ('Flag Football', 'Open', 'Intermediate', 'Fall 2026', '2026-08-31', '2026-12-06', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
+    ('Ultimate Frisbee', 'Coed', 'Recreational', 'Fall 2026', '2026-08-31', '2026-12-06', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
+    ('Dodgeball', 'Open', 'Recreational', 'Fall 2026', '2026-08-31', '2026-12-06', '2026-07-15T09:00:00-04:00', '2026-08-23T23:59:00-04:00', '2026-08-29'),
+    ('Soccer', 'Coed', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-11-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
     ('Soccer', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
-    ('Basketball', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
+    ('Basketball', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-11-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
     ('Basketball', 'Coed', 'Intermediate', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
-    ('Volleyball', 'Coed', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
+    ('Volleyball', 'Coed', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-11-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
     ('Volleyball', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
-    ('Flag Football', 'Open', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
-    ('Ultimate Frisbee', 'Coed', 'Intermediate', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
-    ('Dodgeball', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
+    ('Flag Football', 'Open', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-11-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
+    ('Ultimate Frisbee', 'Coed', 'Intermediate', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-11-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
+    ('Dodgeball', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-11-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
     ('Kickball', 'Coed', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
     ('Futsal', 'Open', 'Competitive', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
     ('Pickleball', 'Open', 'Recreational', 'Spring 2027', '2027-01-25', '2027-04-23', '2026-12-01T09:00:00-05:00', '2027-01-20T23:59:00-05:00', '2027-01-24'),
@@ -465,7 +468,7 @@ FROM (VALUES
     ('Coed Soccer, Recreational, Fall 2026', 'South Campus Turf Field A', 'Pitch Perfect', 'Blue Ridge Rovers', '2026-10-05T20:00:00-04:00', '2026-10-05T21:30:00-04:00', NULL, 'completed'),
     ('Coed Soccer, Recreational, Fall 2026', 'South Campus Turf Field A', 'Blacksburg United', 'Strikers FC', '2026-10-19T18:00:00-04:00', '2026-10-19T19:30:00-04:00', 1, 'scheduled'),
     ('Coed Soccer, Recreational, Fall 2026', 'South Campus Turf Field A', 'Pitch Perfect', 'Blue Ridge Rovers', '2026-10-19T20:00:00-04:00', '2026-10-19T21:30:00-04:00', 1, 'scheduled'),
-    ('Coed Soccer, Recreational, Fall 2026', 'South Campus Turf Field A', NULL, NULL, '2026-10-26T19:00:00-04:00', '2026-10-26T20:30:00-04:00', 2, 'scheduled'),
+    ('Coed Soccer, Recreational, Fall 2026', 'South Campus Turf Field A', NULL, NULL, '2026-12-05T13:00:00-05:00', '2026-12-05T14:30:00-05:00', 2, 'scheduled'),
     ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', 'Full Court Press', 'The Rebounders', '2026-09-01T18:00:00-04:00', '2026-09-01T19:10:00-04:00', NULL, 'completed'),
     ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', 'Hokie Hoopers', 'Net Results', '2026-09-01T20:00:00-04:00', '2026-09-01T21:10:00-04:00', NULL, 'completed'),
     ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', 'Full Court Press', 'Hokie Hoopers', '2026-09-08T18:00:00-04:00', '2026-09-08T19:10:00-04:00', NULL, 'completed'),
@@ -480,7 +483,7 @@ FROM (VALUES
     ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', 'Hokie Hoopers', 'The Rebounders', '2026-10-06T20:00:00-04:00', '2026-10-06T21:10:00-04:00', NULL, 'completed'),
     ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', 'Net Results', 'Full Court Press', '2026-10-20T18:00:00-04:00', '2026-10-20T19:10:00-04:00', 1, 'scheduled'),
     ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', 'Hokie Hoopers', 'The Rebounders', '2026-10-20T20:00:00-04:00', '2026-10-20T21:10:00-04:00', 1, 'scheduled'),
-    ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', NULL, NULL, '2026-10-27T19:00:00-04:00', '2026-10-27T20:10:00-04:00', 2, 'scheduled'),
+    ('Open Basketball, Competitive, Fall 2026', 'Recreation Gym Court 1', NULL, NULL, '2026-12-05T15:00:00-05:00', '2026-12-05T16:10:00-05:00', 2, 'scheduled'),
     ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', 'Block Party', 'Set to Win', '2026-09-02T18:00:00-04:00', '2026-09-02T19:15:00-04:00', NULL, 'completed'),
     ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', 'Dig Deep', 'Ace Brigade', '2026-09-02T20:00:00-04:00', '2026-09-02T21:15:00-04:00', NULL, 'completed'),
     ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', 'Block Party', 'Dig Deep', '2026-09-09T18:00:00-04:00', '2026-09-09T19:15:00-04:00', NULL, 'completed'),
@@ -495,7 +498,7 @@ FROM (VALUES
     ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', 'Dig Deep', 'Set to Win', '2026-10-07T20:00:00-04:00', '2026-10-07T21:15:00-04:00', NULL, 'completed'),
     ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', 'Set to Win', 'Ace Brigade', '2026-10-21T18:00:00-04:00', '2026-10-21T19:15:00-04:00', 1, 'scheduled'),
     ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', 'Block Party', 'Dig Deep', '2026-10-21T20:00:00-04:00', '2026-10-21T21:15:00-04:00', 1, 'scheduled'),
-    ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', NULL, NULL, '2026-10-28T19:00:00-04:00', '2026-10-28T20:15:00-04:00', 2, 'scheduled'),
+    ('Coed Volleyball, Recreational, Fall 2026', 'Recreation Gym Court 2', NULL, NULL, '2026-12-05T17:00:00-05:00', '2026-12-05T18:15:00-05:00', 2, 'scheduled'),
     ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', 'End Zone Express', 'Gridiron Crew', '2026-09-03T18:00:00-04:00', '2026-09-03T19:10:00-04:00', NULL, 'completed'),
     ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', 'Fourth and Goal', 'The Blitz', '2026-09-03T20:00:00-04:00', '2026-09-03T21:10:00-04:00', NULL, 'completed'),
     ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', 'End Zone Express', 'Fourth and Goal', '2026-09-10T18:00:00-04:00', '2026-09-10T19:10:00-04:00', NULL, 'completed'),
@@ -510,7 +513,7 @@ FROM (VALUES
     ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', 'Fourth and Goal', 'Gridiron Crew', '2026-10-08T20:00:00-04:00', '2026-10-08T21:10:00-04:00', NULL, 'completed'),
     ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', 'Fourth and Goal', 'Gridiron Crew', '2026-10-22T18:00:00-04:00', '2026-10-22T19:10:00-04:00', 1, 'scheduled'),
     ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', 'The Blitz', 'End Zone Express', '2026-10-22T20:00:00-04:00', '2026-10-22T21:10:00-04:00', 1, 'scheduled'),
-    ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', NULL, NULL, '2026-10-29T19:00:00-04:00', '2026-10-29T20:10:00-04:00', 2, 'scheduled'),
+    ('Open Flag Football, Intermediate, Fall 2026', 'East Campus Flag Football Field', NULL, NULL, '2026-12-06T13:00:00-05:00', '2026-12-06T14:10:00-05:00', 2, 'scheduled'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', 'Flying Discs', 'Skyline Spinners', '2026-09-04T18:00:00-04:00', '2026-09-04T19:30:00-04:00', NULL, 'completed'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', 'Deep Space', 'The Hucksters', '2026-09-04T20:00:00-04:00', '2026-09-04T21:30:00-04:00', NULL, 'completed'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', 'Flying Discs', 'Deep Space', '2026-09-11T18:00:00-04:00', '2026-09-11T19:30:00-04:00', NULL, 'completed'),
@@ -525,7 +528,7 @@ FROM (VALUES
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', 'Deep Space', 'Skyline Spinners', '2026-10-09T20:00:00-04:00', '2026-10-09T21:30:00-04:00', NULL, 'completed'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', 'The Hucksters', 'Deep Space', '2026-10-23T18:00:00-04:00', '2026-10-23T19:30:00-04:00', 1, 'scheduled'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', 'Flying Discs', 'Skyline Spinners', '2026-10-23T20:00:00-04:00', '2026-10-23T21:30:00-04:00', 1, 'scheduled'),
-    ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', NULL, NULL, '2026-10-30T19:00:00-04:00', '2026-10-30T20:30:00-04:00', 2, 'scheduled'),
+    ('Coed Ultimate Frisbee, Recreational, Fall 2026', 'Meadow Practice Field', NULL, NULL, '2026-12-06T15:00:00-05:00', '2026-12-06T16:30:00-05:00', 2, 'scheduled'),
     ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', 'Dodge Dynasty', 'Rapid Throws', '2026-09-05T18:00:00-04:00', '2026-09-05T19:00:00-04:00', NULL, 'completed'),
     ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', 'The Side-Steppers', 'Ballistic Squad', '2026-09-05T20:00:00-04:00', '2026-09-05T21:00:00-04:00', NULL, 'completed'),
     ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', 'Dodge Dynasty', 'The Side-Steppers', '2026-09-12T18:00:00-04:00', '2026-09-12T19:00:00-04:00', NULL, 'completed'),
@@ -540,7 +543,7 @@ FROM (VALUES
     ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', 'The Side-Steppers', 'Rapid Throws', '2026-10-10T20:00:00-04:00', '2026-10-10T21:00:00-04:00', NULL, 'completed'),
     ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', 'Rapid Throws', 'Dodge Dynasty', '2026-10-24T18:00:00-04:00', '2026-10-24T19:00:00-04:00', 1, 'scheduled'),
     ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', 'The Side-Steppers', 'Ballistic Squad', '2026-10-24T20:00:00-04:00', '2026-10-24T21:00:00-04:00', 1, 'scheduled'),
-    ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', NULL, NULL, '2026-10-31T19:00:00-04:00', '2026-10-31T20:00:00-04:00', 2, 'scheduled')
+    ('Open Dodgeball, Recreational, Fall 2026', 'Multipurpose Gym Court 3', NULL, NULL, '2026-12-06T17:00:00-05:00', '2026-12-06T18:00:00-05:00', 2, 'scheduled')
 ) AS seed (league_name, facility_name, home_name, away_name, start_time, end_time, playoff_round, game_status)
 JOIN LeagueView l ON l.league_name = seed.league_name
 JOIN Facility f ON f.facility_name = seed.facility_name
@@ -580,7 +583,7 @@ FROM (VALUES
     ('Coed Soccer, Recreational, Fall 2026', '2026-10-05T20:00:00-04:00', 'simvt0121', 'simvt0133', 'referee', 'completed', '2026-09-30T20:00:00-04:00'),
     ('Coed Soccer, Recreational, Fall 2026', '2026-10-19T18:00:00-04:00', 'simvt0121', 'simvt0133', 'referee', 'assigned', '2026-10-14T18:00:00-04:00'),
     ('Coed Soccer, Recreational, Fall 2026', '2026-10-19T20:00:00-04:00', 'simvt0122', 'simvt0133', 'referee', 'assigned', '2026-10-14T20:00:00-04:00'),
-    ('Coed Soccer, Recreational, Fall 2026', '2026-10-26T19:00:00-04:00', 'simvt0121', 'simvt0133', 'referee', 'assigned', '2026-10-21T19:00:00-04:00'),
+    ('Coed Soccer, Recreational, Fall 2026', '2026-12-05T13:00:00-05:00', 'simvt0121', 'simvt0133', 'referee', 'assigned', '2026-10-21T19:00:00-04:00'),
     ('Open Basketball, Competitive, Fall 2026', '2026-09-01T18:00:00-04:00', 'simvt0123', 'simvt0134', 'referee', 'completed', '2026-08-27T18:00:00-04:00'),
     ('Open Basketball, Competitive, Fall 2026', '2026-09-01T18:00:00-04:00', 'simvt0124', 'simvt0134', 'scorekeeper', 'completed', '2026-08-27T18:00:00-04:00'),
     ('Open Basketball, Competitive, Fall 2026', '2026-09-01T20:00:00-04:00', 'simvt0124', 'simvt0134', 'referee', 'completed', '2026-08-27T20:00:00-04:00'),
@@ -609,8 +612,8 @@ FROM (VALUES
     ('Open Basketball, Competitive, Fall 2026', '2026-10-20T18:00:00-04:00', 'simvt0124', 'simvt0134', 'scorekeeper', 'assigned', '2026-10-15T18:00:00-04:00'),
     ('Open Basketball, Competitive, Fall 2026', '2026-10-20T20:00:00-04:00', 'simvt0124', 'simvt0134', 'referee', 'assigned', '2026-10-15T20:00:00-04:00'),
     ('Open Basketball, Competitive, Fall 2026', '2026-10-20T20:00:00-04:00', 'simvt0123', 'simvt0134', 'scorekeeper', 'assigned', '2026-10-15T20:00:00-04:00'),
-    ('Open Basketball, Competitive, Fall 2026', '2026-10-27T19:00:00-04:00', 'simvt0123', 'simvt0134', 'referee', 'assigned', '2026-10-22T19:00:00-04:00'),
-    ('Open Basketball, Competitive, Fall 2026', '2026-10-27T19:00:00-04:00', 'simvt0124', 'simvt0134', 'scorekeeper', 'assigned', '2026-10-22T19:00:00-04:00'),
+    ('Open Basketball, Competitive, Fall 2026', '2026-12-05T15:00:00-05:00', 'simvt0123', 'simvt0134', 'referee', 'assigned', '2026-10-22T19:00:00-04:00'),
+    ('Open Basketball, Competitive, Fall 2026', '2026-12-05T15:00:00-05:00', 'simvt0124', 'simvt0134', 'scorekeeper', 'assigned', '2026-10-22T19:00:00-04:00'),
     ('Coed Volleyball, Recreational, Fall 2026', '2026-09-02T18:00:00-04:00', 'simvt0125', 'simvt0135', 'referee', 'completed', '2026-08-28T18:00:00-04:00'),
     ('Coed Volleyball, Recreational, Fall 2026', '2026-09-02T20:00:00-04:00', 'simvt0126', 'simvt0135', 'referee', 'completed', '2026-08-28T20:00:00-04:00'),
     ('Coed Volleyball, Recreational, Fall 2026', '2026-09-09T18:00:00-04:00', 'simvt0126', 'simvt0135', 'referee', 'completed', '2026-09-04T18:00:00-04:00'),
@@ -625,7 +628,7 @@ FROM (VALUES
     ('Coed Volleyball, Recreational, Fall 2026', '2026-10-07T20:00:00-04:00', 'simvt0125', 'simvt0135', 'referee', 'completed', '2026-10-02T20:00:00-04:00'),
     ('Coed Volleyball, Recreational, Fall 2026', '2026-10-21T18:00:00-04:00', 'simvt0125', 'simvt0135', 'referee', 'assigned', '2026-10-16T18:00:00-04:00'),
     ('Coed Volleyball, Recreational, Fall 2026', '2026-10-21T20:00:00-04:00', 'simvt0126', 'simvt0135', 'referee', 'assigned', '2026-10-16T20:00:00-04:00'),
-    ('Coed Volleyball, Recreational, Fall 2026', '2026-10-28T19:00:00-04:00', 'simvt0125', 'simvt0135', 'referee', 'assigned', '2026-10-23T19:00:00-04:00'),
+    ('Coed Volleyball, Recreational, Fall 2026', '2026-12-05T17:00:00-05:00', 'simvt0125', 'simvt0135', 'referee', 'assigned', '2026-10-23T19:00:00-04:00'),
     ('Open Flag Football, Intermediate, Fall 2026', '2026-09-03T18:00:00-04:00', 'simvt0127', 'simvt0133', 'referee', 'completed', '2026-08-29T18:00:00-04:00'),
     ('Open Flag Football, Intermediate, Fall 2026', '2026-09-03T20:00:00-04:00', 'simvt0128', 'simvt0133', 'referee', 'completed', '2026-08-29T20:00:00-04:00'),
     ('Open Flag Football, Intermediate, Fall 2026', '2026-09-10T18:00:00-04:00', 'simvt0128', 'simvt0133', 'referee', 'completed', '2026-09-05T18:00:00-04:00'),
@@ -642,8 +645,8 @@ FROM (VALUES
     ('Open Flag Football, Intermediate, Fall 2026', '2026-10-22T18:00:00-04:00', 'simvt0128', 'simvt0133', 'line_judge', 'assigned', '2026-10-17T18:00:00-04:00'),
     ('Open Flag Football, Intermediate, Fall 2026', '2026-10-22T20:00:00-04:00', 'simvt0128', 'simvt0133', 'referee', 'assigned', '2026-10-17T20:00:00-04:00'),
     ('Open Flag Football, Intermediate, Fall 2026', '2026-10-22T20:00:00-04:00', 'simvt0127', 'simvt0133', 'line_judge', 'assigned', '2026-10-17T20:00:00-04:00'),
-    ('Open Flag Football, Intermediate, Fall 2026', '2026-10-29T19:00:00-04:00', 'simvt0127', 'simvt0133', 'referee', 'assigned', '2026-10-24T19:00:00-04:00'),
-    ('Open Flag Football, Intermediate, Fall 2026', '2026-10-29T19:00:00-04:00', 'simvt0128', 'simvt0133', 'line_judge', 'assigned', '2026-10-24T19:00:00-04:00'),
+    ('Open Flag Football, Intermediate, Fall 2026', '2026-12-06T13:00:00-05:00', 'simvt0127', 'simvt0133', 'referee', 'assigned', '2026-10-24T19:00:00-04:00'),
+    ('Open Flag Football, Intermediate, Fall 2026', '2026-12-06T13:00:00-05:00', 'simvt0128', 'simvt0133', 'line_judge', 'assigned', '2026-10-24T19:00:00-04:00'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-09-04T18:00:00-04:00', 'simvt0129', 'simvt0134', 'referee', 'completed', '2026-08-30T18:00:00-04:00'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-09-04T20:00:00-04:00', 'simvt0130', 'simvt0134', 'referee', 'completed', '2026-08-30T20:00:00-04:00'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-09-11T18:00:00-04:00', 'simvt0130', 'simvt0134', 'referee', 'completed', '2026-09-06T18:00:00-04:00'),
@@ -658,7 +661,7 @@ FROM (VALUES
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-10-09T20:00:00-04:00', 'simvt0129', 'simvt0134', 'referee', 'completed', '2026-10-04T20:00:00-04:00'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-10-23T18:00:00-04:00', 'simvt0129', 'simvt0134', 'referee', 'assigned', '2026-10-18T18:00:00-04:00'),
     ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-10-23T20:00:00-04:00', 'simvt0130', 'simvt0134', 'referee', 'assigned', '2026-10-18T20:00:00-04:00'),
-    ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-10-30T19:00:00-04:00', 'simvt0129', 'simvt0134', 'referee', 'assigned', '2026-10-25T19:00:00-04:00'),
+    ('Coed Ultimate Frisbee, Recreational, Fall 2026', '2026-12-06T15:00:00-05:00', 'simvt0129', 'simvt0134', 'referee', 'assigned', '2026-10-25T19:00:00-04:00'),
     ('Open Dodgeball, Recreational, Fall 2026', '2026-09-05T18:00:00-04:00', 'simvt0131', 'simvt0135', 'referee', 'completed', '2026-08-31T18:00:00-04:00'),
     ('Open Dodgeball, Recreational, Fall 2026', '2026-09-05T20:00:00-04:00', 'simvt0132', 'simvt0135', 'referee', 'completed', '2026-08-31T20:00:00-04:00'),
     ('Open Dodgeball, Recreational, Fall 2026', '2026-09-12T18:00:00-04:00', 'simvt0132', 'simvt0135', 'referee', 'completed', '2026-09-07T18:00:00-04:00'),
@@ -673,7 +676,7 @@ FROM (VALUES
     ('Open Dodgeball, Recreational, Fall 2026', '2026-10-10T20:00:00-04:00', 'simvt0131', 'simvt0135', 'referee', 'completed', '2026-10-05T20:00:00-04:00'),
     ('Open Dodgeball, Recreational, Fall 2026', '2026-10-24T18:00:00-04:00', 'simvt0131', 'simvt0135', 'referee', 'assigned', '2026-10-19T18:00:00-04:00'),
     ('Open Dodgeball, Recreational, Fall 2026', '2026-10-24T20:00:00-04:00', 'simvt0132', 'simvt0135', 'referee', 'assigned', '2026-10-19T20:00:00-04:00'),
-    ('Open Dodgeball, Recreational, Fall 2026', '2026-10-31T19:00:00-04:00', 'simvt0131', 'simvt0135', 'referee', 'assigned', '2026-10-26T19:00:00-04:00')
+    ('Open Dodgeball, Recreational, Fall 2026', '2026-12-06T17:00:00-05:00', 'simvt0131', 'simvt0135', 'referee', 'assigned', '2026-10-26T19:00:00-04:00')
 ) AS seed (league_name, game_start, official_pid, admin_pid, position, assignment_status, assigned_at)
 JOIN LeagueView l ON l.league_name = seed.league_name
 JOIN Game g ON g.league_id = l.league_id AND g.start_time = seed.game_start::timestamptz

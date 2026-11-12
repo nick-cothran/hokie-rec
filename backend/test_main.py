@@ -137,6 +137,21 @@ class ApiTest(TeamCase):
                          {'Soccer', 'Basketball', 'Volleyball', 'Flag Football', 'Ultimate Frisbee', 'Dodgeball'})
         self.assertTrue(all(row[1] for row in rows))
 
+    def test_seed_demo_has_scoreable_semifinals_and_upcoming_finals(self):
+        # As of Nov 10: semifinals are over but unscored (officials enter results in the app),
+        # finals are still ahead with pending assignments (officials can accept or decline).
+        rows = sql("""
+            SELECT g.playoff_round, COUNT(DISTINCT g.game_id),
+                   BOOL_AND(g.end_time < TIMESTAMPTZ '2026-11-10 12:00:00-05:00'),
+                   BOOL_AND(g.start_time > TIMESTAMPTZ '2026-11-10 12:00:00-05:00'),
+                   BOOL_AND(g.home_team_id IS NOT NULL AND g.away_team_id IS NOT NULL),
+                   COUNT(r.report_id), BOOL_AND(a.status = 'assigned')
+            FROM Game g JOIN OfficiatingAssignment a ON a.game_id = g.game_id
+            LEFT JOIN ScoreReport r ON r.game_id = g.game_id
+            WHERE g.playoff_round IS NOT NULL GROUP BY g.playoff_round ORDER BY g.playoff_round
+        """)
+        self.assertEqual(rows, [(1, 12, True, False, True, 0, True), (2, 6, False, True, False, 0, True)])
+
     def test_s2_registration_closed_is_409(self):
         self.adjust_league("reg_close_at = NOW() - INTERVAL '1 minute'")
         r = self.register()
@@ -648,7 +663,8 @@ class AssignmentTest(unittest.TestCase):
         mine = {r[0] for r in sql("SELECT assignment_id FROM OfficiatingAssignment WHERE official_id = %s", (self.o1,))}
         self.assertEqual({r["assignment_id"] for r in rows}, mine)
         row = next(r for r in rows if r["assignment_id"] == self.assignment_id)
-        self.assertEqual((row["assignment_status"], row["can_respond"], row["game_id"]), ("assigned", True, self.game_id))
+        self.assertEqual((row["assignment_status"], row["can_respond"], row["has_ended"], row["game_id"]),
+                         ("assigned", True, False, self.game_id))
         sign_in(self.o2)
         self.assertNotIn(self.assignment_id, [r["assignment_id"] for r in client.get("/api/me/assignments").json()])
 

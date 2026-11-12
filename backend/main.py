@@ -463,7 +463,8 @@ def my_assignments(user: AuthenticatedUser):
     with db() as conn:
         return conn.execute(f"""
             SELECT oa.assignment_id, oa.position, oa.status AS assignment_status,
-                   oa.status = 'assigned' AND g.start_time > NOW() AS can_respond, {GAME_COLUMNS}
+                   oa.status = 'assigned' AND g.start_time > NOW() AS can_respond,
+                   g.end_time <= NOW() AS has_ended, {GAME_COLUMNS}
             FROM OfficiatingAssignment oa JOIN Game g ON g.game_id = oa.game_id {GAME_JOINS}
             WHERE oa.official_id = %s
             ORDER BY g.start_time, g.game_id

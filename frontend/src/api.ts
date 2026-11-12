@@ -76,6 +76,13 @@ export function formatDate(iso: string) {
   return new Date(year, month - 1, day).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+// Game times are campus (Blacksburg) times, e.g. "Sat, Dec 5, 1:00 PM"
+export function formatGameTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  })
+}
+
 type ValidationIssue = { loc?: (string | number)[]; msg: string }
 
 // FastAPI sends {detail: "text"} for our errors and {detail: [{loc, msg}]} for pydantic validation
@@ -217,7 +224,7 @@ export type Game = {
 }
 
 // One of the signed-in official's assignments (GET /api/me/assignments)
-export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean }
+export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean; has_ended: boolean }
 
 export type IncidentReport = {
   incident_id: number
@@ -244,4 +251,39 @@ export type IncidentReport = {
   reviewed_by: number | null
   reviewed_by_first_name: string | null
   reviewed_by_last_name: string | null
+}
+
+// One submitted result; the newest report for a game is its current result
+export type ScoreReport = {
+  report_id: number
+  home_score: number | null
+  away_score: number | null
+  forfeit_team_id: number | null
+  submitted_at: string
+  submitted_by: number
+  first_name: string
+  last_name: string
+  is_current: boolean
+}
+
+// GET /api/games/{id}/score-reports, for the game's officials and administrators
+export type ScoreSheet = {
+  game: {
+    game_id: number
+    league_id: number
+    league_name: string
+    status: string
+    start_time: string
+    end_time: string
+    home_team_id: number | null
+    home_team_name: string | null
+    away_team_id: number | null
+    away_team_name: string | null
+    facility_name: string
+    location: string
+    has_ended: boolean
+  }
+  reports: ScoreReport[]
+  can_submit: boolean
+  blocked_reason: string | null
 }
