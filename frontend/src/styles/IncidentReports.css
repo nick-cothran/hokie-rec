@@ -14,3 +14,7 @@
 .incident-actions { margin-top: 0.2rem; }
 .pill-reviewed { background: #e6f4ea; color: #1e6b34; }
 .pill-dismissed { background: #f1f1f1; color: #536278; }
+.admin-player-tools { display: grid; gap: 0.75rem; }
+.admin-player-tools .section-heading h2 { margin: 0; }
+.admin-player-tools .filters { margin-bottom: 0.25rem; }
+.suspension-actions { align-items: center; }

@@ -757,6 +757,54 @@ class AssignmentTest(unittest.TestCase):
         self.assertFalse(row["can_respond"])
 
 
+class AdminToolsTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        uid = lambda pid: sql("SELECT user_id FROM Users WHERE vt_pid = %s", (pid,))[0][0]
+        self.official = uid("simvt0121")
+        self.admin = uid("simvt0133")
+        self.player = uid("simvt0001")
+        self.previous_suspension = sql("SELECT suspended_until FROM Users WHERE user_id = %s", (self.player,))[0][0]
+        self.addCleanup(sql, "UPDATE Users SET suspended_until = %s WHERE user_id = %s",
+                        (self.previous_suspension, self.player))
+        self.game_id = sql("""
+            INSERT INTO Game (league_id, facility_id, start_time, end_time)
+            SELECT league_id, (SELECT MIN(facility_id) FROM Facility), NOW() + INTERVAL '7 days',
+                   NOW() + INTERVAL '7 days 1 hour'
+            FROM Game ORDER BY game_id LIMIT 1 RETURNING game_id
+        """)[0][0]
+        self.addCleanup(sql, "DELETE FROM Game WHERE game_id = %s", (self.game_id,))
+
+    def test_assignment_creation_is_admin_only_and_rejects_duplicates(self):
+        payload = {"game_id": self.game_id, "official_id": self.official, "position": "referee"}
+        self.assertEqual(client.post("/api/admin/assignments", json=payload).status_code, 401)
+        sign_in(self.player)
+        self.assertEqual(client.post("/api/admin/assignments", json=payload).status_code, 403)
+        sign_in(self.admin)
+        response = client.post("/api/admin/assignments", json=payload)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual((response.json()["status"], response.json()["official_id"]), ("assigned", self.official))
+        self.assertEqual(client.post("/api/admin/assignments", json=payload).status_code, 409)
+        assigned_by = sql("SELECT assigned_by FROM OfficiatingAssignment WHERE game_id = %s", (self.game_id,))[0][0]
+        self.assertEqual(assigned_by, self.admin)
+
+    def test_suspension_can_be_set_and_cleared_by_admin(self):
+        path = f"/api/admin/players/{self.player}/suspension"
+        until = sql("SELECT CURRENT_DATE + 3")[0][0].isoformat()
+        payload = {"suspended_until": until}
+        self.assertEqual(client.patch(path, json=payload).status_code, 401)
+        sign_in(self.player)
+        self.assertEqual(client.get("/api/admin/players").status_code, 403)
+        self.assertEqual(client.patch(path, json=payload).status_code, 403)
+        sign_in(self.admin)
+        self.assertEqual(client.patch(path, json=payload).status_code, 204)
+        listed = client.get(f"/api/admin/players?q=simvt0001").json()
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["suspended_until"], until)
+        self.assertEqual(client.patch(path, json={"suspended_until": None}).status_code, 204)
+        self.assertIsNone(sql("SELECT suspended_until FROM Users WHERE user_id = %s", (self.player,))[0][0])
+
+
 class IncidentApiTest(unittest.TestCase):
     def setUp(self):
         client.cookies.clear()

@@ -1,7 +1,7 @@
 import '../styles/IncidentReports.css'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { api, useApi, type Assignment, type IncidentReport } from '../api'
+import { api, formatDate, query, useApi, type AdminPlayer, type Assignment, type IncidentReport } from '../api'
 import { useAuth } from '../auth'
 
 function when(iso: string) {
@@ -162,6 +162,88 @@ function IncidentList({ reports, isAdmin, onDecided }: {
   )
 }
 
+function localDateAfter(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function PlayerSuspensions() {
+  const [search, setSearch] = useState('')
+  const [term, setTerm] = useState('')
+  const [suspendedUntil, setSuspendedUntil] = useState(() => localDateAfter(7))
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState<number | null>(null)
+  const players = useApi<AdminPlayer[]>(`/api/admin/players${query({ q: term })}`)
+
+  async function update(player: AdminPlayer, until: string | null) {
+    setBusy(player.user_id)
+    setError('')
+    try {
+      await api(`/api/admin/players/${player.user_id}/suspension`, {
+        method: 'PATCH',
+        body: JSON.stringify({ suspended_until: until }),
+      })
+      players.reload()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <section className="admin-player-tools" aria-labelledby="player-suspensions-heading">
+      <div className="section-heading"><h2 id="player-suspensions-heading">Player suspensions</h2></div>
+      <form className="filters" onSubmit={event => { event.preventDefault(); setTerm(search.trim()) }}>
+        <label className="field">Find a player
+          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Name or VT PID" />
+        </label>
+        <label className="field">Suspend through
+          <input type="date" min={localDateAfter(0)} value={suspendedUntil}
+            onChange={event => setSuspendedUntil(event.target.value)} required />
+        </label>
+        <button className="button button-outline" type="submit">Search</button>
+      </form>
+      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {players.error && <p className="notice notice-error" role="alert">{players.error}</p>}
+      {players.loading && !players.data && <p className="loading">Loading players…</p>}
+      {players.data?.length === 0 && <p>No players found.</p>}
+      {!!players.data?.length && (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead><tr><th>Player</th><th>VT PID</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {players.data.map(player => (
+                <tr key={player.user_id}>
+                  <td>{player.first_name} {player.last_name}</td>
+                  <td>{player.vt_pid}</td>
+                  <td>{!player.is_active ? 'Inactive' : player.suspended_until ? `Suspended through ${formatDate(player.suspended_until)}` : 'Active'}</td>
+                  <td>
+                    {player.is_active && (
+                      <div className="form-row suspension-actions">
+                        <button className="button button-outline button-small" type="button" disabled={busy !== null || !suspendedUntil}
+                          onClick={() => update(player, suspendedUntil)}>
+                          {player.suspended_until ? 'Update suspension' : 'Suspend'}
+                        </button>
+                        {player.suspended_until && (
+                          <button className="button button-outline button-small" type="button" disabled={busy !== null}
+                            onClick={() => update(player, null)}>Unsuspend</button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {players.data && players.data.length === 100 && <p className="result-count">Showing the first 100 matches. Search by a more specific name or PID.</p>}
+    </section>
+  )
+}
+
 function IncidentReports() {
   const { user, loading } = useAuth()
   const isOfficial = user?.role === 'official'
@@ -198,6 +280,7 @@ function IncidentReports() {
       {(isOfficial || isAdmin) && reports.data && (
         <IncidentList reports={reports.data} isAdmin={isAdmin} onDecided={reports.reload} />
       )}
+      {isAdmin && <PlayerSuspensions />}
       {reports.loading && !reports.data && <p className="loading">Loading incident reports…</p>}
     </main>
   )

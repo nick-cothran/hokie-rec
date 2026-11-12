@@ -254,6 +254,17 @@ export type MyGames = { upcoming: Game[]; recent: Game[] }
 // One of the signed-in official's assignments (GET /api/me/assignments)
 export type Assignment = Game & { assignment_id: number; position: string; assignment_status: string; can_respond: boolean; has_ended: boolean }
 
+export type Official = { user_id: number; first_name: string; last_name: string; vt_pid: string }
+
+export type AdminPlayer = {
+  user_id: number
+  vt_pid: string
+  first_name: string
+  last_name: string
+  is_active: boolean
+  suspended_until: string | null
+}
+
 export type IncidentReport = {
   incident_id: number
   game_id: number

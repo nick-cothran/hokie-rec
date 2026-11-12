@@ -1,8 +1,8 @@
 import '../styles/Schedule.css'
 import '../styles/Teams.css'
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { api, formatGameTime as when, query, useApi, type Assignment, type Game, type League, type MyGames } from '../api'
+import { api, formatGameTime as when, query, useApi, type Assignment, type Game, type League, type MyGames, type Official } from '../api'
 import { useAuth } from '../auth'
 
 function result(g: Game) {
@@ -100,6 +100,81 @@ function Assignments() {
   )
 }
 
+function AdminAssignmentForm({ games }: { games: Game[] }) {
+  const officials = useApi<Official[]>('/api/admin/officials')
+  const [gameId, setGameId] = useState('')
+  const [officialId, setOfficialId] = useState('')
+  const [position, setPosition] = useState('referee')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [now] = useState(() => Date.now())
+  const upcoming = games.filter(game => game.status === 'scheduled' && new Date(game.start_time).getTime() > now)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      await api('/api/admin/assignments', {
+        method: 'POST',
+        body: JSON.stringify({ game_id: Number(gameId), official_id: Number(officialId), position }),
+      })
+      setNotice('Assignment created.')
+      setOfficialId('')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="panel" aria-labelledby="admin-assignments-heading">
+      <h2 id="admin-assignments-heading">Create an officiating assignment</h2>
+      {officials.error && <p className="notice notice-error" role="alert">{officials.error}</p>}
+      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {notice && <p className="notice notice-success" role="status">{notice}</p>}
+      {upcoming.length === 0 ? <p>No upcoming scheduled games in this league.</p> : officials.data?.length === 0 ? (
+        <p>No active officials are available.</p>
+      ) : (
+        <form className="form-row admin-assignment-form" onSubmit={submit}>
+          <label className="field">Game
+            <select value={gameId} onChange={e => setGameId(e.target.value)} required>
+              <option value="">Choose a game</option>
+              {upcoming.map(game => (
+                <option key={game.game_id} value={game.game_id}>
+                  {when(game.start_time)} · {game.facility_name} · {game.home_team_name ?? 'TBD'} vs {game.away_team_name ?? 'TBD'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">Official
+            <select value={officialId} onChange={e => setOfficialId(e.target.value)} required>
+              <option value="">Choose an official</option>
+              {officials.data?.map(official => (
+                <option key={official.user_id} value={official.user_id}>
+                  {official.first_name} {official.last_name} · {official.vt_pid}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">Position
+            <select value={position} onChange={e => setPosition(e.target.value)}>
+              <option value="referee">Referee</option>
+              <option value="scorekeeper">Scorekeeper</option>
+            </select>
+          </label>
+          <button className="button button-primary" type="submit" disabled={saving || officials.loading || !gameId || !officialId}>
+            {saving ? 'Creating…' : 'Assign official'}
+          </button>
+        </form>
+      )}
+    </section>
+  )
+}
+
 function Schedule() {
   const { user } = useAuth()
   const location = useLocation()
@@ -122,6 +197,7 @@ function Schedule() {
 
       {user?.role === 'official' && <Assignments />}
       {user?.role === 'player' && <YourGames key={user.user_id} />}
+      {user?.role === 'admin' && games.data && <AdminAssignmentForm games={games.data} />}
 
       <section>
         <h2>League schedule</h2>

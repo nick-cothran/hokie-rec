@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 import os
 from contextlib import asynccontextmanager
 from datetime import date
+from datetime import date
 from typing import Annotated
 
 from database import db
@@ -110,6 +111,19 @@ class TeamRename(BaseModel):
 
     team_name: TeamName
 
+class NewAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    game_id: int
+    official_id: int
+    position: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)] = "referee"
+
+
+class PlayerSuspension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suspended_until: date | None
+
 
 # Today on campus; roster lock dates are Blacksburg calendar dates
 LOCAL_TODAY = "(NOW() AT TIME ZONE 'America/New_York')::date"
@@ -161,6 +175,10 @@ def require_team_captain(team: dict, user: dict):
 def require_unlocked(team: dict):
     if team["roster_locked"]:
         raise HTTPException(409, f"The roster is locked (lock date {fmt_date(team['roster_lock_date'])}).")
+
+def require_admin(user: dict):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Only administrators can do that.")
 
 
 @app.get("/api/health")
@@ -547,6 +565,73 @@ def accept_assignment(assignment_id: int, user: AuthenticatedUser):
 @app.post("/api/assignments/{assignment_id}/decline", status_code=204)
 def decline_assignment(assignment_id: int, user: AuthenticatedUser):
     answer_assignment(assignment_id, user, "declined")
+
+@app.get("/api/admin/officials")
+def list_officials(user: AuthenticatedUser):
+    require_admin(user)
+    with db() as conn:
+        return conn.execute("""
+            SELECT user_id, first_name, last_name, vt_pid
+            FROM Users WHERE role = 'official' AND is_active
+            ORDER BY last_name, first_name, user_id
+        """).fetchall()
+
+@app.post("/api/admin/assignments", status_code=201)
+def create_assignment(body: NewAssignment, user: AuthenticatedUser):
+    require_admin(user)
+    with db() as conn:
+        game = conn.execute("""
+            SELECT status, start_time > NOW() AS upcoming FROM Game WHERE game_id = %s
+        """, (body.game_id,)).fetchone()
+        if game is None:
+            raise HTTPException(404, "Game not found.")
+        if game["status"] != "scheduled" or not game["upcoming"]:
+            raise HTTPException(409, "Assignments can only be created for future scheduled games.")
+        official = conn.execute("""
+            SELECT 1 FROM Users WHERE user_id = %s AND role = 'official' AND is_active
+        """, (body.official_id,)).fetchone()
+        if official is None:
+            raise HTTPException(409, "Choose an active official.")
+        assignment = conn.execute("""
+            INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status)
+            VALUES (%s, %s, %s, %s, 'assigned')
+            ON CONFLICT (game_id, official_id) DO NOTHING
+            RETURNING assignment_id, game_id, official_id, position, status
+        """, (body.game_id, body.official_id, user["user_id"], body.position)).fetchone()
+        if assignment is None:
+            raise HTTPException(409, "This official is already assigned to that game.") from None
+        return assignment
+
+@app.get("/api/admin/players")
+def list_players(user: AuthenticatedUser, q: str = ""):
+    require_admin(user)
+    search = f"%{q.strip()}%"
+    with db() as conn:
+        return conn.execute(f"""
+            SELECT user_id, vt_pid, first_name, last_name, is_active,
+                   CASE WHEN suspended_until >= {LOCAL_TODAY} THEN suspended_until END AS suspended_until
+            FROM Users
+            WHERE role = 'player'
+              AND (%(q)s = '%%' OR vt_pid ILIKE %(q)s OR first_name ILIKE %(q)s OR last_name ILIKE %(q)s)
+            ORDER BY last_name, first_name, user_id
+            LIMIT 100
+        """, {"q": search}).fetchall()
+
+@app.patch("/api/admin/players/{player_id}/suspension", status_code=204)
+def set_player_suspension(player_id: int, body: PlayerSuspension, user: AuthenticatedUser):
+    require_admin(user)
+    with db() as conn:
+        if body.suspended_until is not None:
+            valid_date = conn.execute(f"SELECT %s >= {LOCAL_TODAY} AS valid", (body.suspended_until,)).fetchone()["valid"]
+            if not valid_date:
+                raise HTTPException(422, "Suspension must end today or later.")
+        updated = conn.execute("""
+            UPDATE Users SET suspended_until = %s
+            WHERE user_id = %s AND role = 'player'
+            RETURNING user_id
+        """, (body.suspended_until, player_id)).fetchone()
+    if updated is None:
+        raise HTTPException(404, "Player not found.")
 
 
 # Report 1: regular-season standings from each game's latest score report (LatestScoreReport view); a forfeit is a loss for the forfeiting team
