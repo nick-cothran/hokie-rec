@@ -1,6 +1,19 @@
 .schedule-page .empty-state { margin-top: 2rem; }
+.assignment-details { margin-top: 1.5rem; }
 .personal-games { margin-bottom: 2rem; }
 .personal-games h3 { margin: 1.25rem 0 0.5rem; font-size: 1rem; }
 .personal-games-list a:not(.button) { color: var(--ink); text-decoration: none; }
 .personal-games-list a:hover { color: var(--orange-dark); text-decoration: underline; }
 .admin-assignment-form { align-items: end; }
+.official-assignments h3 { margin: 1.25rem 0 0.5rem; font-size: 1rem; }
+.assignment-list a:not(.button) { color: var(--ink); text-decoration: none; }
+.assignment-list a:not(.button):hover { color: var(--orange-dark); text-decoration: underline; }
+.assignment-history { margin-top: 1.25rem; }
+.assignment-history summary { cursor: pointer; font-weight: 700; }
+.admin-schedule-tools { margin-top: 2.5rem; }
+.schedule-tool { margin-top: 0.75rem; border: 1px solid var(--line); background: var(--paper); }
+.schedule-tool > summary { padding: 1rem 1.25rem; cursor: pointer; font-weight: 700; }
+.schedule-tool > .panel { border: 0; border-top: 1px solid var(--line); }
+.schedule-tool-content { padding: 1.25rem; border-top: 1px solid var(--line); }
+.schedule-tool-content h3 { margin: 0 0 0.75rem; }
+.schedule-tool-content > p { color: var(--ink-soft); }

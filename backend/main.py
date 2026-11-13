@@ -17,7 +17,7 @@ from incidents import router as incidents_router
 from scores import router as scores_router
 from profiles import router as profiles_router
 from playoffs import router as playoffs_router
-from standings import league_standings
+from standings import bracket_seed_order, league_standings
 
 
 @asynccontextmanager
@@ -47,7 +47,7 @@ async def protect_browser_requests(request: Request, call_next):
         if request.headers.get("x-requested-with") != "HokieRec" or (origin is not None and origin not in ALLOWED_ORIGINS):
             return JSONResponse(status_code=403, content={"detail": "Request could not be verified. Refresh the page and try again."})
     response = await call_next(request)
-    if request.url.path.startswith("/api/auth/") or request.url.path in ("/api/me/profile", "/api/me/teams", "/api/me/games"):
+    if request.url.path.startswith("/api/auth/") or request.url.path.endswith("/eligibility") or request.url.path in ("/api/me/profile", "/api/me/teams", "/api/me/games", "/api/me/membership-history"):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -192,10 +192,18 @@ def health():
 @app.get("/api/leagues")
 def list_leagues(sport: str | None = None, term: str | None = None):
     with db() as conn:
-        return conn.execute("""
-            SELECT l.league_id, l.league_name, l.sport_name, l.category, l.skill_level, l.term,
-                   l.reg_open_at, l.reg_close_at,
-                   NOW() BETWEEN l.reg_open_at AND l.reg_close_at AS registration_open,
+        return conn.execute(f"""
+            SELECT l.league_id, l.league_name, l.sport_name, l.category, l.skill_level, l.term, l.min_roster_size,
+                   l.start_date, l.end_date, l.reg_open_at, l.reg_close_at,
+                   (NOW() BETWEEN l.reg_open_at AND l.reg_close_at AND {LOCAL_TODAY} < l.roster_lock_date
+                    AND NOT EXISTS (SELECT 1 FROM Game pg WHERE pg.league_id = l.league_id AND pg.playoff_round IS NOT NULL)) AS registration_open,
+                   CASE
+                     WHEN EXISTS (SELECT 1 FROM Game pg WHERE pg.league_id = l.league_id AND pg.playoff_round IS NOT NULL)
+                          OR {LOCAL_TODAY} >= l.roster_lock_date OR NOW() > l.reg_close_at THEN 'closed'
+                     WHEN NOW() < l.reg_open_at AND l.reg_open_at < (l.roster_lock_date::timestamp AT TIME ZONE 'America/New_York') THEN 'upcoming'
+                     WHEN NOW() BETWEEN l.reg_open_at AND l.reg_close_at THEN 'open'
+                     ELSE 'closed'
+                   END AS registration_status,
                    (SELECT COUNT(*) FROM Team t WHERE t.league_id = l.league_id) AS team_count
             FROM LeagueView l
             WHERE (%(sport)s::text IS NULL OR l.sport_name = %(sport)s)
@@ -208,6 +216,7 @@ def list_leagues(sport: str | None = None, term: str | None = None):
 @app.post("/api/teams", status_code=201)
 def register_team(body: NewTeam, user: AuthenticatedUser):
     with db() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('hokie-rec:game-scheduling'))")
         eligible = conn.execute(f"""
             SELECT 1 FROM Users WHERE user_id = %s AND role = 'player' AND is_active
               AND (suspended_until IS NULL OR suspended_until < {LOCAL_TODAY})
@@ -216,7 +225,9 @@ def register_team(body: NewTeam, user: AuthenticatedUser):
             raise HTTPException(403, "Only active, non-suspended players can register a team.")
         # Lock the player so two registrations at once can't both pass the league check
         conn.execute("SELECT 1 FROM Users WHERE user_id = %s FOR UPDATE", (user["user_id"],))
-        open_now = conn.execute("SELECT NOW() BETWEEN reg_open_at AND reg_close_at AS open FROM League WHERE league_id = %s",
+        open_now = conn.execute(f"""SELECT (NOW() BETWEEN reg_open_at AND reg_close_at AND {LOCAL_TODAY} < roster_lock_date
+                   AND NOT EXISTS (SELECT 1 FROM Game pg WHERE pg.league_id = League.league_id AND pg.playoff_round IS NOT NULL)) AS open
+                   FROM League WHERE league_id = %s""",
                                 (body.league_id,)).fetchone()
         if open_now is not None and not open_now["open"]:  # unknown league falls through to the FK's 409
             raise HTTPException(409, "Registration for this league is not open.")
@@ -292,21 +303,41 @@ def get_team(team_id: int):
     return team
 
 
+@app.get("/api/teams/{team_id}/eligibility")
+def roster_eligibility(team_id: int, user: AuthenticatedUser):
+    with db() as conn:
+        team = team_rules(conn, team_id)
+        if user['role'] != 'admin' and team['captain_id'] != user['user_id']:
+            raise HTTPException(403, "Only the captain or an administrator can view roster eligibility.")
+        return conn.execute(f"""
+            SELECT r.user_id, (u.suspended_until >= {LOCAL_TODAY}) IS TRUE AS suspended
+            FROM RosterMembership r JOIN Users u ON u.user_id = r.user_id
+            WHERE r.team_id = %s AND r.status = 'active'
+        """, (team_id,)).fetchall()
+
+
 # S3: the captain renames their team
 @app.patch("/api/teams/{team_id}")
 def rename_team(team_id: int, body: TeamRename, user: AuthenticatedUser):
     with db() as conn:
-        require_team_captain(team_rules(conn, team_id), user)
-        return conn.execute(
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('hokie-rec:game-scheduling'))")
+        team = team_rules(conn, team_id, for_update=True)
+        require_team_captain(team, user)
+        before_seeds = bracket_seed_order(conn, team['league_id'])
+        updated = conn.execute(
             "UPDATE Team SET team_name = %s WHERE team_id = %s RETURNING team_id, team_name",
             (body.team_name, team_id),
         ).fetchone()
+        if before_seeds is not None and before_seeds != bracket_seed_order(conn, team['league_id']):
+            raise HTTPException(409, "This name would change playoff seed order. Remove the unplayed bracket before renaming the team.")
+        return updated
 
 
 # The captain deletes their team: roster rows CASCADE, a team with games is blocked by RESTRICT (409)
 @app.delete("/api/teams/{team_id}", status_code=204)
 def delete_team(team_id: int, user: AuthenticatedUser):
     with db() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('hokie-rec:game-scheduling'))")
         require_team_captain(team_rules(conn, team_id), user)
         conn.execute("DELETE FROM Team WHERE team_id = %s", (team_id,))
 
@@ -467,6 +498,30 @@ def hand_off_captaincy(team_id: int, body: NewCaptain, user: AuthenticatedUser):
                             (body.user_id, team_id)).fetchone()
 
 
+@app.put("/api/admin/teams/{team_id}/captain")
+def admin_reassign_captain(team_id: int, body: NewCaptain, user: Admin):
+    with db() as conn:
+        team = team_rules(conn, team_id, for_update=True)
+        if body.user_id == team['captain_id']:
+            raise HTTPException(409, "This player is already captain.")
+        if not conn.execute("SELECT 1 FROM RosterMembership WHERE team_id = %s AND user_id = %s AND status = 'active'", (team_id, body.user_id)).fetchone():
+            raise HTTPException(409, "The new captain must be an active member of this team.")
+        return conn.execute("UPDATE Team SET captain_id = %s WHERE team_id = %s RETURNING team_id, captain_id", (body.user_id, team_id)).fetchone()
+
+
+@app.get("/api/me/membership-history")
+def membership_history(user: AuthenticatedUser):
+    with db() as conn:
+        return conn.execute("""
+            SELECT p.period_id, p.team_id, COALESCE(t.team_name, p.team_name) AS team_name,
+                   COALESCE(l.league_name, p.league_name) AS league_name,
+                   COALESCE(p.end_reason, 'active') AS status, p.joined_at, p.left_at
+            FROM MembershipPeriod p LEFT JOIN Team t ON t.team_id = p.team_id
+            LEFT JOIN LeagueView l ON l.league_id = t.league_id
+            WHERE p.user_id = %s ORDER BY p.joined_at DESC, p.period_id DESC
+        """, (user['user_id'],)).fetchall()
+
+
 # A game with its league, place, teams (null for an undecided playoff game) and latest score; alias g
 GAME_COLUMNS = """
     g.game_id, g.league_id, l.league_name, g.start_time, g.end_time, f.facility_name, f.location,
@@ -524,7 +579,7 @@ def my_assignments(user: AuthenticatedUser):
     with db() as conn:
         return conn.execute(f"""
             SELECT oa.assignment_id, oa.position, oa.status AS assignment_status,
-                   oa.status = 'assigned' AND g.start_time > NOW() AS can_respond,
+                   oa.status = 'assigned' AND g.status = 'scheduled' AND g.start_time > NOW() AS can_respond,
                    g.end_time <= NOW() AS has_ended, {GAME_COLUMNS}
             FROM OfficiatingAssignment oa JOIN Game g ON g.game_id = oa.game_id {GAME_JOINS}
             WHERE oa.official_id = %s
@@ -538,6 +593,14 @@ def answer_assignment(assignment_id: int, user: dict, status: str):
         raise HTTPException(404, "You don't have that assignment.")
     user_id = user["user_id"]
     with db() as conn:
+        game = conn.execute("""
+            SELECT g.status FROM Game g JOIN OfficiatingAssignment oa ON oa.game_id = g.game_id
+            WHERE oa.assignment_id = %s AND oa.official_id = %s FOR UPDATE OF g
+        """, (assignment_id, user_id)).fetchone()
+        if game is None:
+            raise HTTPException(404, "You don't have that assignment.")
+        if game['status'] != 'scheduled':
+            raise HTTPException(409, "This game is no longer scheduled.")
         # One conditional UPDATE, so two tabs answering at once can't both win
         if conn.execute("""
             UPDATE OfficiatingAssignment oa SET status = %s FROM Game g
@@ -574,21 +637,44 @@ def list_officials(user: Admin):
             ORDER BY last_name, first_name, user_id
         """).fetchall()
 
+
+@app.get("/api/admin/games/coverage")
+def game_coverage(user: Admin, league_id: int):
+    with db() as conn:
+        return conn.execute("""
+            SELECT g.game_id, COUNT(a.assignment_id) FILTER (WHERE a.status <> 'declined' AND u.is_active AND u.role = 'official') AS assigned_count
+            FROM Game g LEFT JOIN OfficiatingAssignment a ON a.game_id = g.game_id
+            LEFT JOIN Users u ON u.user_id = a.official_id
+            WHERE g.league_id = %s AND g.status = 'scheduled'
+            GROUP BY g.game_id ORDER BY g.start_time, g.game_id
+        """, (league_id,)).fetchall()
+
 @app.post("/api/admin/assignments", status_code=201)
 def create_assignment(body: NewAssignment, user: Admin):
     with db() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('hokie-rec:game-scheduling'))")
         game = conn.execute("""
-            SELECT status, start_time > NOW() AS upcoming FROM Game WHERE game_id = %s
+            SELECT status, end_time <= NOW() AS ended FROM Game WHERE game_id = %s FOR UPDATE
         """, (body.game_id,)).fetchone()
         if game is None:
             raise HTTPException(404, "Game not found.")
-        if game["status"] != "scheduled" or not game["upcoming"]:
-            raise HTTPException(409, "Assignments can only be created for future scheduled games.")
+        if game["status"] not in ("scheduled", "completed"):
+            raise HTTPException(409, "Assignments can only be created for scheduled or completed games.")
+        if game['status'] == 'completed' and not game['ended']:
+            raise HTTPException(409, "A completed game's scheduled end must have passed before assigning an official for a correction.")
         official = conn.execute("""
             SELECT 1 FROM Users WHERE user_id = %s AND role = 'official' AND is_active
         """, (body.official_id,)).fetchone()
         if official is None:
             raise HTTPException(409, "Choose an active official.")
+        if game["status"] == "scheduled" and conn.execute("""
+            SELECT 1 FROM OfficiatingAssignment a JOIN Game existing ON existing.game_id = a.game_id
+            JOIN Game target ON target.game_id = %s
+            WHERE a.official_id = %s AND a.status <> 'declined' AND existing.status <> 'cancelled'
+              AND existing.game_id <> target.game_id
+              AND existing.start_time < target.end_time AND existing.end_time > target.start_time LIMIT 1
+        """, (body.game_id, body.official_id)).fetchone():
+            raise HTTPException(409, "This official is assigned to another game at that time.")
         assignment = conn.execute("""
             INSERT INTO OfficiatingAssignment (game_id, official_id, assigned_by, position, status)
             VALUES (%s, %s, %s, %s, 'assigned')
@@ -598,6 +684,36 @@ def create_assignment(body: NewAssignment, user: Admin):
         if assignment is None:
             raise HTTPException(409, "This official is already assigned to that game.") from None
         return assignment
+
+
+@app.get("/api/admin/games/{game_id}/assignments")
+def game_assignments(game_id: int, user: Admin):
+    with db() as conn:
+        if not conn.execute("SELECT 1 FROM Game WHERE game_id = %s", (game_id,)).fetchone():
+            raise HTTPException(404, "Game not found.")
+        return conn.execute("""
+            SELECT a.assignment_id, a.official_id, a.position, a.status,
+                   u.first_name, u.last_name, u.vt_pid
+            FROM OfficiatingAssignment a JOIN Users u ON u.user_id = a.official_id
+            WHERE a.game_id = %s ORDER BY u.last_name, u.first_name, a.assignment_id
+        """, (game_id,)).fetchall()
+
+
+@app.delete("/api/admin/assignments/{assignment_id}", status_code=204)
+def remove_assignment(assignment_id: int, user: Admin):
+    with db() as conn:
+        assignment = conn.execute("""
+            SELECT g.game_id, a.official_id FROM Game g JOIN OfficiatingAssignment a ON a.game_id = g.game_id
+            WHERE a.assignment_id = %s FOR UPDATE OF g, a
+        """, (assignment_id,)).fetchone()
+        if assignment is None:
+            raise HTTPException(404, "Assignment not found.")
+        if conn.execute("""
+            SELECT 1 FROM ScoreReport WHERE game_id = %s AND submitted_by = %s
+            UNION ALL SELECT 1 FROM IncidentReport WHERE game_id = %s AND filed_by = %s LIMIT 1
+        """, (assignment['game_id'], assignment['official_id'], assignment['game_id'], assignment['official_id'])).fetchone():
+            raise HTTPException(409, "This official has filed a report for the game; their assignment must be kept.")
+        conn.execute("DELETE FROM OfficiatingAssignment WHERE assignment_id = %s", (assignment_id,))
 
 @app.get("/api/admin/players")
 def list_players(user: Admin, q: str = ""):

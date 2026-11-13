@@ -7,10 +7,10 @@ from database import db
 
 def migrate():
     with db() as conn:
-        for name in ("auth.sql", "roster.sql", "phase3.sql"):
+        for name in ("auth.sql", "roster.sql", "phase3.sql", "final_features.sql"):
             conn.execute((Path(__file__).resolve().parents[1] / "db" / name).read_text())
 
 
 if __name__ == "__main__":
     migrate()
-    print("Auth tables, roster rules, and the Phase III schema are ready. Existing data was preserved.")
+    print("Auth tables, roster rules, the Phase III schema, and final feature updates are ready. Existing data was preserved.")

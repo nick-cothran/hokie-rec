@@ -185,6 +185,7 @@ function Playoffs({ leagueId }: { leagueId: number }) {
   return (
     <section className="playoffs" aria-labelledby="playoffs-heading">
       <div className="section-heading"><h2 id="playoffs-heading">Playoffs</h2></div>
+      {games.data && playoff.length > 0 && <p className="playoffs-intro">Winners advance to the next round. The winner of the final is the champion.</p>}
       {notice && <p className="notice notice-success" role="status">{notice}</p>}
       {(games.error || error) && <p className="notice notice-error" role="alert">{games.error || error}</p>}
       {games.loading && !games.data && <p className="loading">Loading playoffs…</p>}

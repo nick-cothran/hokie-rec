@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from auth import AuthenticatedUser
 from database import db
 from playoffs import advance_winner, playoff_winner
+from standings import bracket_seed_order
 
 router = APIRouter(prefix="/api/games", tags=["Score reports"])
 Score = Annotated[int, Field(strict=True, ge=0, le=2_147_483_647)]
@@ -35,6 +36,7 @@ def game_details(conn, game_id: int, *, lock: bool = False) -> dict:
     game = conn.execute(f"""
         SELECT g.game_id, g.league_id, l.league_name, g.status, g.start_time, g.end_time,
                g.playoff_round, g.next_game_id,
+               EXISTS (SELECT 1 FROM Game pg WHERE pg.league_id = g.league_id AND pg.playoff_round IS NOT NULL) AS bracket_exists,
                g.home_team_id, h.team_name AS home_team_name,
                g.away_team_id, a.team_name AS away_team_name,
                f.facility_name, f.location, g.end_time <= clock_timestamp() AS has_ended
@@ -96,6 +98,8 @@ def submit_score_report(game_id: int, body: NewScoreReport, user: AuthenticatedU
     if user["role"] != "official":
         raise HTTPException(403, "Only an official assigned to this game can submit its result.")
     with db() as conn:
+        # Serialize standings and advancement with bracket and schedule changes.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('hokie-rec:game-scheduling'))")
         # Serializes submissions with corrections and ordinary administrator game
         # updates. Hold the assignment too, so a concurrent decline cannot race us.
         game = game_details(conn, game_id, lock=True)
@@ -107,6 +111,7 @@ def submit_score_report(game_id: int, body: NewScoreReport, user: AuthenticatedU
             raise HTTPException(403 if assignment is None or assignment["status"] == "declined" else 409, reason)
         if body.forfeit_team_id is not None and body.forfeit_team_id not in (game["home_team_id"], game["away_team_id"]):
             raise HTTPException(422, "The forfeiting team must be one of this game's two teams.")
+        before_seeds = bracket_seed_order(conn, game['league_id']) if game['playoff_round'] is None else None
         if game["playoff_round"] is not None:
             winner = playoff_winner(game, body.home_score, body.away_score, body.forfeit_team_id)
             if winner is None:
@@ -118,6 +123,9 @@ def submit_score_report(game_id: int, body: NewScoreReport, user: AuthenticatedU
             VALUES (%s, %s, %s, %s, %s, clock_timestamp())
             RETURNING report_id, submitted_at
         """, (game_id, user["user_id"], body.home_score, body.away_score, body.forfeit_team_id)).fetchone()
+        if before_seeds is not None:
+            if before_seeds != bracket_seed_order(conn, game['league_id']):
+                raise HTTPException(409, "This result would change playoff seeds. An administrator must remove the unplayed bracket before you submit it. Once playoffs have results, this correction is unavailable.")
         # In the same transaction: participation uses status; standings use reports.
         conn.execute("UPDATE Game SET status = 'completed' WHERE game_id = %s", (game_id,))
     return {"game_id": game_id, **report}

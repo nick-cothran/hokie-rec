@@ -1,6 +1,6 @@
 import '../styles/LeagueDetail.css'
 import { Link, useParams } from 'react-router-dom'
-import { query, useApi, type League, type TeamSummary } from '../api'
+import { formatCampusDate, query, useApi, type League, type TeamSummary } from '../api'
 import TeamTable from './TeamTable'
 import Playoffs from './Playoffs'
 import { useAuth } from '../auth'
@@ -47,7 +47,9 @@ function LeagueDetail() {
                   <li>Sport <strong>{league.sport_name}</strong></li>
                   <li>Category <strong>{league.category}</strong></li>
                   <li>Level <strong>{league.skill_level}</strong></li>
+                  <li>Registration <strong>{league.registration_status === 'upcoming' ? `Opens ${formatCampusDate(league.reg_open_at)}` : league.registration_status === 'open' ? 'Open' : 'Closed'}</strong></li>
                 </ul>
+                <div className="form-row league-quick-links"><Link className="text-link" to={`/schedule?league=${id}`}>View schedule →</Link><Link className="text-link" to={`/reports?league=${id}`}>View standings →</Link></div>
               </div>
               {canRegister && registrationOpen && <Link className="button button-primary" to={`/teams/new${query({ league: id })}`}>Register a team</Link>}
             </div>

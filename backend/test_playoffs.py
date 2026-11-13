@@ -35,7 +35,7 @@ def setUpModule():
     try:
         root = Path(__file__).resolve().parents[1]
         with database.db() as conn:
-            for name in ("schema", "auth", "roster", "phase3", "seed"):
+            for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
             conn.execute("""
                 INSERT INTO UserCredentials (user_id, password_hash)
@@ -223,6 +223,26 @@ class AdvancementTest(PlayoffCase):
         self.assertEqual(self.final_teams(), (self.semi1['away_team_id'], self.semi2['away_team_id']))
         # Same winner is still fine
         self.assertEqual(self.submit(self.semi1, {'home_score': 0, 'away_score': 3}).status_code, 201)
+
+    def test_advancement_rejects_a_team_schedule_conflict(self):
+        winner = self.semi1['home_team_id']
+        original_final = self.final_teams()
+        opponent = next(row['team_id'] for row in sql('SELECT team_id FROM Team WHERE league_id = %s AND team_id <> %s LIMIT 1', (self.league, winner)))
+        conflict = sql("INSERT INTO Game (league_id, facility_id, home_team_id, away_team_id, start_time, end_time) VALUES (%s, %s, %s, %s, %s, %s) RETURNING game_id", (self.league, self.facility, winner, opponent, self.final['start_time'], self.final['end_time']))[0]['game_id']
+        try:
+            response = self.submit(self.semi1, {'home_score': 2, 'away_score': 0})
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertIn('another game', response.json()['detail'])
+            self.assertEqual(self.final_teams()[0], None)
+            self.assertEqual(sql('SELECT COUNT(*) AS n FROM ScoreReport WHERE game_id = %s', (self.semi1['game_id'],))[0]['n'], 0)
+        finally:
+            sql('DELETE FROM Game WHERE game_id = %s', (conflict,))
+        try:
+            self.assertEqual(self.submit(self.semi1, {'home_score': 2, 'away_score': 0}).status_code, 201)
+        finally:
+            sql('DELETE FROM ScoreReport WHERE game_id = %s', (self.semi1['game_id'],))
+            sql("UPDATE Game SET status = 'scheduled' WHERE game_id = %s", (self.semi1['game_id'],))
+            sql('UPDATE Game SET home_team_id = %s, away_team_id = %s WHERE game_id = %s', (*original_final, self.final['game_id']))
 
 
 class FeederOrderTest(PlayoffCase):

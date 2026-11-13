@@ -58,7 +58,7 @@ function Leagues() {
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr><th>League</th><th>Sport</th><th>Category</th><th>Level</th><th>Term</th><th className="num">Teams</th></tr>
+                <tr><th>League</th><th>Sport</th><th>Category</th><th>Level</th><th>Term</th><th>Registration</th><th className="num">Teams</th></tr>
               </thead>
               <tbody>
                 {results.data.map(l => (
@@ -68,6 +68,7 @@ function Leagues() {
                     <td>{l.category}</td>
                     <td>{l.skill_level}</td>
                     <td>{l.term}</td>
+                    <td><span className={`pill ${l.registration_status === 'open' ? 'pill-active' : ''}`}>{l.registration_status}</span></td>
                     <td className="num">{l.team_count}</td>
                   </tr>
                 ))}

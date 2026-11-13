@@ -19,9 +19,9 @@ function SignIn() {
     setBusy(true)
     setError('')
     try {
-      await signIn(pid, password)
+      const current = await signIn(pid, password)
       setPassword('')
-      navigate(accountDestination(params.get('next')), { replace: true })
+      navigate(accountDestination(params.get('next'), current.role), { replace: true })
     } catch (failure) {
       setError((failure as Error).message)
       setPassword('')

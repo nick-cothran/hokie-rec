@@ -137,6 +137,7 @@ function ScoreEntry() {
 
           <section className="panel" aria-labelledby="enter-result-heading">
             <h2 id="enter-result-heading">{current ? 'Correct the result' : 'Enter the result'}</h2>
+            {game.playoff_round === null && game.bracket_exists && sheet.data.can_submit && <p className="notice notice-info">A playoff bracket already exists. A result that changes its seeds requires the unplayed bracket to be removed first.</p>}
             {game.playoff_round !== null && sheet.data.can_submit && (
               <p className="result-count">Playoff game: enter the score after any tiebreaker. {game.next_game_id !== null && 'The winner moves on to the next round.'}</p>
             )}

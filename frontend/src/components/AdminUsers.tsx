@@ -112,6 +112,7 @@ function AdminUsers() {
       </div>
 
       <div className="stack">
+        <p><Link className="button button-outline" to="/admin/setup">Manage sports, leagues & facilities</Link></p>
         {notice && <p className="notice notice-success" role="status">{notice}</p>}
         <CreateAccount onCreated={message => { setNotice(message); users.reload() }} />
 

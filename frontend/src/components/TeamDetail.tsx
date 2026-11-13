@@ -78,7 +78,7 @@ function InviteForm({ team, onSaved }: { team: Team; onSaved: (message: string) 
 }
 
 // The captain hands captaincy to another active member
-function HandOffForm({ team, onSaved }: { team: Team; onSaved: (message: string) => void }) {
+function HandOffForm({ team, onSaved, admin = false }: { team: Team; onSaved: (message: string) => void; admin?: boolean }) {
   const members = team.roster.filter(m => m.status === 'active' && m.user_id !== team.captain_id)
   const [userId, setUserId] = useState('')
   const [error, setError] = useState('')
@@ -86,10 +86,10 @@ function HandOffForm({ team, onSaved }: { team: Team; onSaved: (message: string)
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const member = members.find(m => m.user_id === Number(userId))
-    if (!member || !window.confirm(`Make ${fullName(member)} the captain of ${team.team_name}?\n\nYou'll stay on the roster as a regular member.`)) return
+    if (!member || !window.confirm(`Make ${fullName(member)} the captain of ${team.team_name}?${admin ? '' : "\n\nYou'll stay on the roster as a regular member."}`)) return
     setError('')
     try {
-      await api(`/api/teams/${team.team_id}/captain`, { method: 'PUT', body: JSON.stringify({ user_id: member.user_id }) })
+      await api(`${admin ? '/api/admin' : '/api'}/teams/${team.team_id}/captain`, { method: 'PUT', body: JSON.stringify({ user_id: member.user_id }) })
       onSaved(`${fullName(member)} is now the captain.`)
     } catch (e) {
       setError((e as Error).message)
@@ -122,6 +122,7 @@ function TeamDetail() {
   const valid = Number.isInteger(id) && id > 0
 
   const { data: team, error, loading, reload } = useApi<Team>(valid ? `/api/teams/${id}` : null)
+  const eligibility = useApi<{ user_id: number; suspended: boolean }[]>(team && (user?.role === 'admin' || team.captain_id === user?.user_id) ? `/api/teams/${id}/eligibility` : null)
   const [notice, setNotice] = useState<string>(location.state?.notice ?? '')
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)  // one roster action at a time, so a double click can't send two
@@ -204,6 +205,7 @@ function TeamDetail() {
           <div className="page-intro">
             <p className="eyebrow"><Link className="text-link" to={`/leagues/${team.league_id}`}>{team.league_name}</Link></p>
             <h1>{team.team_name}</h1>
+            <div className="form-row"><Link className="text-link" to={`/schedule?league=${team.league_id}&team=${team.team_id}`}>View schedule →</Link><Link className="text-link" to={`/reports?league=${team.league_id}`}>View standings →</Link></div>
             <ul className="meta-list">
               <li>Captain <strong>{captain ? fullName(captain) : `User #${team.captain_id}`}</strong></li>
               <li>Status <strong>{team.status}</strong></li>
@@ -213,6 +215,7 @@ function TeamDetail() {
           </div>
 
           {notice && <p className="notice notice-success" role="status">{notice}</p>}
+          {user?.role === 'admin' && <section className="panel"><h2>Reassign captain</h2><HandOffForm key={team.captain_id} team={team} onSaved={saved} admin /></section>}
           {actionError && <p className="notice notice-error" role="alert">{actionError}</p>}
 
           {mine?.status === 'invited' && (
@@ -254,6 +257,7 @@ function TeamDetail() {
 
           <section>
             <div className="section-heading"><h2>Roster</h2></div>
+            {eligibility.error && <p className="notice notice-error" role="alert">Could not load private eligibility information: {eligibility.error}</p>}
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
@@ -266,7 +270,7 @@ function TeamDetail() {
                         {fullName(m)}
                         {m.user_id === team.captain_id && <> <span className="pill pill-captain">Captain</span></>}
                       </td>
-                      <td><span className={`pill pill-${m.status}`}>{m.status === 'invited' ? 'Invite pending' : m.status}</span></td>
+                      <td><span className={`pill pill-${m.status}`}>{m.status === 'invited' ? 'Invite pending' : m.status}</span>{eligibility.data?.some(item => item.user_id === m.user_id && item.suspended) && <> · Suspended — not eligible to play</>}</td>
                       {isCaptain && (
                         <td className="num">
                           {m.status === 'invited' && (

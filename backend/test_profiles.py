@@ -28,7 +28,7 @@ def setUpModule():
         conn.execute(pgsql.SQL("CREATE SCHEMA {}").format(pgsql.Identifier(TEST_SCHEMA)))
     try:
         with psycopg.connect(TEST_URL) as conn:
-            for name in ("schema", "auth", "roster", "phase3", "seed"):
+            for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((Path(__file__).resolve().parents[1] / f"db/{name}.sql").read_text())
         PASSWORD_HASH = password_hasher.hash(PASSWORD)
         database.DATABASE_URL = TEST_URL

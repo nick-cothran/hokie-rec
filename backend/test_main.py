@@ -31,7 +31,7 @@ def setUpModule():
     try:
         root = Path(__file__).resolve().parents[1]
         with psycopg.connect(DATABASE_URL) as conn:
-            for name in ("schema", "auth", "roster", "phase3", "seed"):
+            for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
             # The API tests use the newest league; open its registration and roster for them.
             conn.execute("""UPDATE League SET reg_open_at = NOW() - INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '30 days',
@@ -106,6 +106,13 @@ class TeamCase(unittest.TestCase):
 
 
 class ApiTest(TeamCase):
+    def test_registration_is_closed_after_roster_lock(self):
+        self.adjust_league("reg_open_at = NOW() - INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '1 day', roster_lock_date = CURRENT_DATE - 1")
+        league = next(row for row in client.get('/api/leagues').json() if row['league_id'] == self.league_id)
+        self.assertFalse(league['registration_open'])
+        self.assertEqual(league['registration_status'], 'closed')
+        self.assertEqual(self.register().status_code, 409)
+
     def test_leagues_report_open_closed_and_upcoming_registration(self):
         def registration():
             response = client.get("/api/leagues")
@@ -115,15 +122,16 @@ class ApiTest(TeamCase):
         self.adjust_league("reg_open_at = NOW() - INTERVAL '2 days', reg_close_at = NOW() - INTERVAL '1 day'")
         closed = registration()
         self.assertFalse(closed["registration_open"])
+        self.assertEqual(closed['registration_status'], 'closed')
         self.assertIn("reg_open_at", closed)
         self.assertIn("reg_close_at", closed)
 
         self.adjust_league("reg_open_at = NOW() + INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '2 days'")
-        self.assertFalse(registration()["registration_open"])
+        self.assertEqual(registration()['registration_status'], 'upcoming')
         self.assertEqual(self.register().status_code, 409)
 
         self.adjust_league("reg_open_at = NOW() - INTERVAL '1 day', reg_close_at = NOW() + INTERVAL '1 day'")
-        self.assertTrue(registration()["registration_open"])
+        self.assertEqual(registration()['registration_status'], 'open')
         self.assertEqual(self.register().status_code, 201)
 
     def test_seed_has_six_leagues_open_on_november_10(self):
@@ -333,6 +341,62 @@ class RosterCase(TeamCase):
 
 
 class RosterTest(RosterCase):
+    def test_history_keeps_rejoins_and_deleted_teams(self):
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        self.assertEqual(client.post(f'/api/teams/{self.team_id}/leave').status_code, 204)
+        sign_in(self.captain)
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        records = [row for row in client.get('/api/me/membership-history').json() if row['team_id'] == self.team_id]
+        self.assertEqual(len(records), 2, records)
+        self.assertEqual({row['status'] for row in records}, {'active', 'left'})
+        sign_in(self.captain)
+        self.assertEqual(client.delete(f'/api/teams/{self.team_id}').status_code, 204)
+        sign_in(self.other)
+        records = [row for row in client.get('/api/me/membership-history').json() if row['team_name'] == self.name]
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(row['team_id'] is None for row in records))
+        self.assertEqual({row['status'] for row in records}, {'team_deleted', 'left'})
+
+    def test_eligibility_is_private_to_captain_and_admin(self):
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        path = f'/api/teams/{self.team_id}/eligibility'
+        self.assertEqual(client.get(path).status_code, 403)
+        sql("UPDATE Users SET suspended_until = CURRENT_DATE + 2 WHERE user_id = %s", (self.other,))
+        self.addCleanup(sql, 'UPDATE Users SET suspended_until = NULL WHERE user_id = %s', (self.other,))
+        sign_in(self.captain)
+        result = client.get(path)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.headers['cache-control'], 'no-store')
+        self.assertTrue(next(row for row in result.json() if row['user_id'] == self.other)['suspended'])
+        sign_in(sql("SELECT user_id FROM Users WHERE role = 'admin' LIMIT 1")[0][0])
+        self.assertEqual(client.get(path).status_code, 200)
+
+    def test_admin_reassigns_captain_only_to_active_member(self):
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        path = f'/api/admin/teams/{self.team_id}/captain'
+        self.assertEqual(client.put(path, json={'user_id': self.other}).status_code, 403)
+        admin = sql("SELECT user_id FROM Users WHERE role = 'admin' LIMIT 1")[0][0]
+        sign_in(admin)
+        self.assertEqual(client.put(path, json={'user_id': self.third}).status_code, 409)
+        self.assertEqual(client.put(path, json={'user_id': self.other}).status_code, 200)
+        self.assertEqual(sql('SELECT captain_id FROM Team WHERE team_id = %s', (self.team_id,))[0][0], self.other)
+
+    def test_membership_history_includes_former_members(self):
+        self.assertEqual(self.invite_pid(self.other).status_code, 201)
+        self.assertEqual(self.accept(self.other).status_code, 204)
+        self.assertEqual(client.post(f'/api/teams/{self.team_id}/leave').status_code, 204)
+        response = client.get('/api/me/membership-history')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        record = next(row for row in response.json() if row['team_id'] == self.team_id)
+        self.assertEqual(record['status'], 'left')
+        self.assertIsNotNone(record['joined_at'])
+        self.assertIsNotNone(record['left_at'])
+
     def test_my_games_follow_membership_and_show_upcoming_and_recent(self):
         other_team = self.register(name=self.name + 'b', user_id=self.third).json()['team_id']
         facility = sql('SELECT MIN(facility_id) FROM Facility')[0][0]
@@ -794,6 +858,93 @@ class AdminToolsTest(unittest.TestCase):
         self.assertEqual(client.post("/api/admin/assignments", json=payload).status_code, 409)
         assigned_by = sql("SELECT assigned_by FROM OfficiatingAssignment WHERE game_id = %s", (self.game_id,))[0][0]
         self.assertEqual(assigned_by, self.admin)
+
+    def test_admin_can_assign_after_kickoff_and_manage_assignment(self):
+        sql("UPDATE Game SET start_time = NOW() - INTERVAL '2 hours', end_time = NOW() - INTERVAL '1 hour' WHERE game_id = %s", (self.game_id,))
+        sign_in(self.admin)
+        response = client.post('/api/admin/assignments', json={'game_id': self.game_id, 'official_id': self.official, 'position': 'referee'})
+        self.assertEqual(response.status_code, 201, response.text)
+        assignment_id = response.json()['assignment_id']
+        self.assertIn(assignment_id, [row['assignment_id'] for row in client.get(f'/api/admin/games/{self.game_id}/assignments').json()])
+        sign_in(self.player)
+        self.assertEqual(client.delete(f'/api/admin/assignments/{assignment_id}').status_code, 403)
+        sign_in(self.admin)
+        self.assertEqual(client.delete(f'/api/admin/assignments/{assignment_id}').status_code, 204)
+        self.assertEqual(client.get(f'/api/admin/games/{self.game_id}/assignments').json(), [])
+
+    def test_cancelled_game_cannot_be_accepted_or_declined(self):
+        sign_in(self.admin)
+        assignment = client.post('/api/admin/assignments', json={'game_id': self.game_id, 'official_id': self.official, 'position': 'referee'}).json()['assignment_id']
+        self.assertEqual(client.post(f'/api/admin/games/{self.game_id}/cancel').status_code, 204)
+        sign_in(self.official)
+        shown = next(row for row in client.get('/api/me/assignments').json() if row['assignment_id'] == assignment)
+        self.assertFalse(shown['can_respond'])
+        self.assertEqual(client.post(f'/api/assignments/{assignment}/accept').status_code, 409)
+        self.assertEqual(client.post(f'/api/assignments/{assignment}/decline').status_code, 409)
+
+    def test_replacement_official_can_correct_completed_game(self):
+        home, away = sql('SELECT a.team_id, b.team_id FROM Team a JOIN Team b ON b.league_id = a.league_id AND b.team_id > a.team_id JOIN Game g ON g.league_id = a.league_id WHERE g.game_id = %s LIMIT 1', (self.game_id,))[0]
+        sql("UPDATE Game SET home_team_id=%s, away_team_id=%s, start_time=NOW()-INTERVAL '3 hours', end_time=NOW()-INTERVAL '2 hours' WHERE game_id=%s", (home, away, self.game_id))
+        sign_in(self.admin)
+        self.assertEqual(client.post('/api/admin/assignments', json={'game_id': self.game_id, 'official_id': self.official, 'position': 'referee'}).status_code, 201)
+        sign_in(self.official)
+        path = f'/api/games/{self.game_id}/score-reports'
+        self.assertEqual(client.post(path, json={'home_score': 2, 'away_score': 0}).status_code, 201)
+        replacement = sql("SELECT user_id FROM Users WHERE role='official' AND user_id <> %s ORDER BY user_id LIMIT 1", (self.official,))[0][0]
+        sign_in(self.admin)
+        self.assertEqual(client.post('/api/admin/assignments', json={'game_id': self.game_id, 'official_id': replacement, 'position': 'referee'}).status_code, 201)
+        sign_in(replacement)
+        response = client.post(path, json={'home_score': 3, 'away_score': 0})
+        self.assertEqual(response.status_code, 201, response.text)
+        reports = client.get(path).json()['reports']
+        self.assertEqual(len(reports), 2)
+        self.assertEqual(reports[0]['home_score'], 3)
+
+    def test_admin_reschedules_and_cancels_future_game(self):
+        facility = sql('SELECT MIN(facility_id) FROM Facility')[0][0]
+        start, end = sql("SELECT NOW() + INTERVAL '3 years', NOW() + INTERVAL '3 years 1 hour'")[0]
+        league, old_start, old_end = sql('SELECT l.league_id, l.start_date, l.end_date FROM League l JOIN Game g USING (league_id) WHERE g.game_id = %s', (self.game_id,))[0]
+        self.addCleanup(sql, 'UPDATE League SET start_date = %s, end_date = %s WHERE league_id = %s', (old_start, old_end, league))
+        sql("UPDATE League SET start_date = LEAST(start_date, %s::date), end_date = GREATEST(end_date, %s::date + 1) WHERE league_id = %s", (start, end, league))
+        sign_in(self.admin)
+        response = client.put(f'/api/admin/games/{self.game_id}/schedule', json={'facility_id': facility, 'start_time': start.isoformat(), 'end_time': end.isoformat()})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(client.post(f'/api/admin/games/{self.game_id}/cancel').status_code, 204)
+        self.assertEqual(sql('SELECT status FROM Game WHERE game_id = %s', (self.game_id,))[0][0], 'cancelled')
+        self.assertEqual(client.post(f'/api/admin/games/{self.game_id}/cancel').status_code, 409)
+
+    def test_cancelled_slot_can_be_reused(self):
+        sign_in(self.admin)
+        self.assertEqual(client.post(f'/api/admin/games/{self.game_id}/cancel').status_code, 204)
+        replacement = sql("""INSERT INTO Game (league_id, facility_id, start_time, end_time)
+            SELECT league_id, facility_id, start_time, end_time FROM Game WHERE game_id = %s RETURNING game_id""", (self.game_id,))[0][0]
+        self.addCleanup(sql, 'DELETE FROM Game WHERE game_id = %s', (replacement,))
+        self.assertIsNotNone(replacement)
+
+    def test_official_cannot_be_double_booked_on_assignment_or_reschedule(self):
+        sign_in(self.admin)
+        payload = {'game_id': self.game_id, 'official_id': self.official, 'position': 'referee'}
+        self.assertEqual(client.post('/api/admin/assignments', json=payload).status_code, 201)
+        other = sql("""INSERT INTO Game (league_id, facility_id, start_time, end_time)
+            SELECT league_id, (SELECT MAX(facility_id) FROM Facility), start_time + INTERVAL '30 minutes', end_time + INTERVAL '30 minutes'
+            FROM Game WHERE game_id = %s RETURNING game_id""", (self.game_id,))[0][0]
+        self.addCleanup(sql, 'DELETE FROM Game WHERE game_id = %s', (other,))
+        self.assertEqual(client.post('/api/admin/assignments', json={**payload, 'game_id': other}).status_code, 409)
+        sql("UPDATE Game SET start_time = start_time + INTERVAL '1 day', end_time = end_time + INTERVAL '1 day' WHERE game_id = %s", (other,))
+        self.assertEqual(client.post('/api/admin/assignments', json={**payload, 'game_id': other}).status_code, 201)
+        row = sql('SELECT facility_id, start_time, end_time FROM Game WHERE game_id = %s', (self.game_id,))[0]
+        other_facility = sql('SELECT facility_id FROM Game WHERE game_id = %s', (other,))[0][0]
+        response = client.put(f'/api/admin/games/{other}/schedule', json={'facility_id': other_facility, 'start_time': row[1].isoformat(), 'end_time': row[2].isoformat()})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('official', response.json()['detail'])
+
+    def test_playoff_game_cannot_be_rescheduled(self):
+        sql('UPDATE Game SET playoff_round = 1 WHERE game_id = %s', (self.game_id,))
+        start, end, facility = sql("SELECT start_time + INTERVAL '2 days', end_time + INTERVAL '2 days', facility_id FROM Game WHERE game_id = %s", (self.game_id,))[0]
+        sign_in(self.admin)
+        response = client.put(f'/api/admin/games/{self.game_id}/schedule', json={'facility_id': facility, 'start_time': start.isoformat(), 'end_time': end.isoformat()})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('Playoff', response.json()['detail'])
 
     def test_suspension_can_be_set_and_cleared_by_admin(self):
         path = f"/api/admin/players/{self.player}/suspension"
@@ -1376,10 +1527,18 @@ class ScheduleCreationTest(unittest.TestCase):
         client.cookies.clear()
         self.admin = sql("SELECT user_id FROM Users WHERE role = 'admin' LIMIT 1")[0][0]
         self.player = eligible_players(1)[0]
-        self.league, self.home, self.away = sql("""
-            SELECT a.league_id, a.team_id, b.team_id FROM Team a JOIN Team b
-            ON a.league_id = b.league_id AND a.team_id < b.team_id LIMIT 1
-        """)[0]
+        self.league = sql("""INSERT INTO League (sport_id, category, skill_level, term, start_date, end_date, reg_open_at, reg_close_at, roster_lock_date)
+            SELECT sport_id, 'Open', 'Rec', %s, CURRENT_DATE + INTERVAL '2 years', CURRENT_DATE + INTERVAL '4 years', NOW(), NOW() + INTERVAL '1 day', CURRENT_DATE + 2
+            FROM Sport ORDER BY sport_id LIMIT 1 RETURNING league_id""", (uuid.uuid4().hex[:15],))[0][0]
+        self.addCleanup(sql, 'DELETE FROM League WHERE league_id = %s', (self.league,))
+        self.addCleanup(sql, 'DELETE FROM Team WHERE league_id = %s', (self.league,))
+        with psycopg.connect(DATABASE_URL) as conn:
+            ids = []
+            for index, player in enumerate(eligible_players(2)):
+                team = conn.execute("INSERT INTO Team (league_id, captain_id, team_name) VALUES (%s, %s, %s) RETURNING team_id", (self.league, player, f'Schedule test {index}')).fetchone()[0]
+                conn.execute("INSERT INTO RosterMembership (team_id, user_id, status, joined_at) VALUES (%s, %s, 'active', NOW())", (team, player))
+                ids.append(team)
+        self.home, self.away = ids
         self.facility = sql("SELECT facility_id FROM Facility ORDER BY facility_id LIMIT 1")[0][0]
         self.other_facility = sql("SELECT facility_id FROM Facility ORDER BY facility_id DESC LIMIT 1")[0][0]
         self.start, self.end = sql("SELECT NOW() + INTERVAL '3 years', NOW() + INTERVAL '3 years 1 hour'")[0]
@@ -1415,6 +1574,28 @@ class ScheduleCreationTest(unittest.TestCase):
         self.assertEqual(self.create(end_time=self.start.isoformat()).status_code, 422)
         self.assertEqual(self.create(start_time='2020-01-01T00:00:00Z', end_time='2020-01-01T01:00:00Z').status_code, 422)
         self.assertEqual(self.create(start_time='2030-01-01T12:00:00', end_time='2030-01-01T13:00:00').status_code, 422)
+        distant_start, distant_end = sql("SELECT NOW() + INTERVAL '10 years', NOW() + INTERVAL '10 years 1 hour'")[0]
+        self.assertEqual(self.create(start_time=distant_start.isoformat(), end_time=distant_end.isoformat()).status_code, 422)
+
+    def test_cannot_add_regular_game_after_bracket_created(self):
+        playoff = sql("INSERT INTO Game (league_id, facility_id, start_time, end_time, playoff_round) VALUES (%s, %s, %s, %s, 1) RETURNING game_id", (self.league, self.other_facility, self.start, self.end))[0][0]
+        self.created.append(playoff)
+        self.assertEqual(self.create().status_code, 409)
+        self.assertEqual(client.post(f'/api/admin/leagues/{self.league}/generate-schedule', json={'facility_id': self.facility, 'start_time': self.start.isoformat(), 'duration_minutes': 60, 'interval_minutes': 120}).status_code, 409)
+
+    def test_cannot_reschedule_outside_the_season(self):
+        game = self.create().json()['game_id']
+        distant_start, distant_end = sql("SELECT NOW() + INTERVAL '10 years', NOW() + INTERVAL '10 years 1 hour'")[0]
+        response = client.put(f'/api/admin/games/{game}/schedule', json={'facility_id': self.facility, 'start_time': distant_start.isoformat(), 'end_time': distant_end.isoformat()})
+        self.assertEqual(response.status_code, 422)
+
+    def test_season_edit_cannot_strand_an_existing_game(self):
+        self.assertEqual(self.create().status_code, 201)
+        league = next(row for row in client.get('/api/admin/setup/leagues').json() if row['league_id'] == self.league)
+        league.pop('league_id')
+        league['end_date'] = league['start_date']
+        response = client.put(f'/api/admin/setup/leagues/{self.league}', json=league)
+        self.assertEqual(response.status_code, 409, response.text)
 
     def test_only_admins_can_schedule(self):
         sign_in(self.player)
@@ -1422,6 +1603,73 @@ class ScheduleCreationTest(unittest.TestCase):
         self.assertEqual(client.get('/api/admin/facilities').status_code, 403)
         client.cookies.clear()
         self.assertEqual(self.create().status_code, 401)
+
+
+class AdminSetupAndGenerationTest(unittest.TestCase):
+    def setUp(self):
+        client.cookies.clear()
+        self.admin = sql("SELECT user_id FROM Users WHERE role = 'admin' LIMIT 1")[0][0]
+        self.player = eligible_players(1)[0]
+        sign_in(self.admin)
+
+    def test_setup_permissions_validation_and_references(self):
+        sport = {"sport_name": "Test " + uuid.uuid4().hex[:8], "min_roster_size": 1, "max_roster_size": 4}
+        sign_in(self.player)
+        self.assertEqual(client.post('/api/admin/setup/sports', json=sport).status_code, 403)
+        sign_in(self.admin)
+        self.assertEqual(client.post('/api/admin/setup/sports', json={**sport, 'max_roster_size': 0}).status_code, 422)
+        response = client.post('/api/admin/setup/sports', json=sport)
+        self.assertEqual(response.status_code, 201, response.text)
+        sport_id = response.json()['sport_id']
+        league = {"sport_id": sport_id, "category": "Open", "skill_level": "Rec", "term": "Test",
+                  "start_date": "2030-01-01", "end_date": "2030-03-01", "reg_open_at": "2029-11-01T00:00:00Z",
+                  "reg_close_at": "2029-12-01T00:00:00Z", "roster_lock_date": "2030-01-01"}
+        created = client.post('/api/admin/setup/leagues', json=league)
+        self.assertEqual(created.status_code, 201, created.text)
+        league_id = created.json()['league_id']
+        self.assertEqual(client.delete(f'/api/admin/setup/sports/{sport_id}').status_code, 409)
+        self.assertEqual(client.put(f'/api/admin/setup/sports/{sport_id}', json={**sport, 'max_roster_size': 6}).status_code, 200)
+        self.assertEqual(client.delete(f'/api/admin/setup/leagues/{league_id}').status_code, 204)
+        self.assertEqual(client.delete(f'/api/admin/setup/sports/{sport_id}').status_code, 204)
+
+    def test_generate_schedule_and_reject_duplicate(self):
+        sport_id = sql('SELECT MIN(sport_id) FROM Sport')[0][0]
+        league = {"sport_id": sport_id, "category": "Open", "skill_level": "Rec", "term": uuid.uuid4().hex[:15],
+                  "start_date": "2030-01-01", "end_date": "2030-03-01", "reg_open_at": "2029-11-01T00:00:00Z",
+                  "reg_close_at": "2029-12-01T00:00:00Z", "roster_lock_date": "2030-01-01"}
+        response = client.post('/api/admin/setup/leagues', json=league)
+        self.assertEqual(response.status_code, 201, response.text)
+        league_id = response.json()['league_id']
+        self.addCleanup(sql, 'DELETE FROM League WHERE league_id = %s', (league_id,))
+        self.addCleanup(sql, 'DELETE FROM Team WHERE league_id = %s', (league_id,))
+        self.addCleanup(sql, 'DELETE FROM Game WHERE league_id = %s', (league_id,))
+        with psycopg.connect(DATABASE_URL) as conn:
+            for index, player in enumerate(eligible_players(3)):
+                team_id = conn.execute("INSERT INTO Team (league_id, captain_id, team_name) VALUES (%s, %s, %s) RETURNING team_id", (league_id, player, f'Test {index}')).fetchone()[0]
+                conn.execute("INSERT INTO RosterMembership (team_id, user_id, status) VALUES (%s, %s, 'active')", (team_id, player))
+        start = sql("SELECT NOW() + INTERVAL '5 years'")[0][0]
+        sql("UPDATE League SET start_date = (%s::timestamptz AT TIME ZONE 'America/New_York')::date - 1, end_date = (%s::timestamptz AT TIME ZONE 'America/New_York')::date + 30 WHERE league_id = %s", (start, start, league_id))
+        body = {"facility_id": sql('SELECT MIN(facility_id) FROM Facility')[0][0], "start_time": start.isoformat(), "duration_minutes": 60, "interval_minutes": 120}
+        path = f'/api/admin/leagues/{league_id}/generate-schedule'
+        sign_in(self.player)
+        self.assertEqual(client.post(path, json=body).status_code, 403)
+        sign_in(self.admin)
+        self.assertEqual(client.post(path, json={**body, 'interval_minutes': 30}).status_code, 422)
+        self.assertEqual(client.post(path, json={**body, 'start_time': '2090-01-01T12:00:00Z'}).status_code, 422)
+        # A conflict with the second proposed game must roll back the first insert too.
+        other_league = sql('SELECT MIN(league_id) FROM League')[0][0]
+        blocker = sql("""INSERT INTO Game (league_id, facility_id, start_time, end_time)
+            VALUES (%s, %s, %s::timestamptz + INTERVAL '2 hours', %s::timestamptz + INTERVAL '3 hours')
+            RETURNING game_id""", (other_league, body['facility_id'], body['start_time'], body['start_time']))[0][0]
+        self.addCleanup(sql, 'DELETE FROM Game WHERE game_id = %s', (blocker,))
+        self.assertEqual(client.post(path, json=body).status_code, 409)
+        self.assertEqual(sql('SELECT COUNT(*) FROM Game WHERE league_id = %s', (league_id,))[0][0], 0)
+        sql('DELETE FROM Game WHERE game_id = %s', (blocker,))
+        result = client.post(path, json=body)
+        self.assertEqual(result.status_code, 201, result.text)
+        self.assertEqual(result.json()['games_created'], 3)
+        self.assertEqual(sql('SELECT COUNT(*) FROM Game WHERE league_id = %s', (league_id,))[0][0], 3)
+        self.assertEqual(client.post(path, json=body).status_code, 409)
 
 
 class SchemaRulesTest(unittest.TestCase):

@@ -6,6 +6,21 @@ import ChangePassword from './ChangePassword'
 import '../styles/SignIn.css'
 import '../styles/Profile.css'
 
+type MembershipHistory = { period_id: number; team_id: number | null; team_name: string; league_name: string; status: string; joined_at: string; left_at: string | null }
+
+function TeamHistory() {
+  const history = useApi<MembershipHistory[]>('/api/me/membership-history')
+  return <section className="panel"><h2>Team history</h2>
+    <p>Your recorded team memberships, including teams you have left.</p>
+    {history.loading && <p role="status">Loading team history…</p>}
+    {history.error && <p className="notice notice-error" role="alert">{history.error}</p>}
+    {!history.loading && !history.error && history.data?.length === 0 && <p>No team memberships yet.</p>}
+    {!history.loading && !history.error && !!history.data?.length && <ul className="invite-list">{history.data.map(entry => <li key={entry.period_id}>
+      <div>{entry.team_id === null ? <strong>{entry.team_name}</strong> : <Link className="text-link" to={`/teams/${entry.team_id}`}>{entry.team_name}</Link>}<span className="invite-meta">{entry.league_name} · {entry.status === 'team_deleted' ? 'Team deleted' : entry.status} · Joined {formatCampusDate(entry.joined_at)}{entry.left_at ? ` · Left ${formatCampusDate(entry.left_at)}` : ''}</span></div>
+    </li>)}</ul>}
+  </section>
+}
+
 function draftFrom(profile: ProfileDetails) {
   return { first_name: profile.first_name, last_name: profile.last_name, email: profile.email, phone: profile.phone ?? '' }
 }
@@ -159,6 +174,7 @@ export default function Profile() {
             {signOutError && <p className="notice notice-error" role="alert">{signOutError}</p>}
           </section>
           <ProfileForm key={profile.user_id} profile={profile} />
+          {user.role === 'player' && <TeamHistory key={user.user_id} />}
           <section className="panel profile-password"><ChangePassword /></section>
         </div>
       )}

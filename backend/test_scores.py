@@ -36,7 +36,7 @@ def setUpModule():
     try:
         root = Path(__file__).resolve().parents[1]
         with database.db() as conn:
-            for name in ("schema", "auth", "roster", "phase3", "seed"):
+            for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
             conn.execute("""
                 INSERT INTO UserCredentials (user_id, password_hash)
@@ -59,9 +59,17 @@ class ScoreReportingTest(unittest.TestCase):
         sql("DELETE FROM AuthLoginAttempt")
         self.people = {row['vt_pid']: row['user_id'] for row in sql("SELECT user_id, vt_pid FROM Users")}
         self.official = self.people['simvt0121']
-        self.league = sql("SELECT league_id FROM LeagueView WHERE term = 'Fall 2026' AND sport_name = 'Soccer'")[0]['league_id']
-        teams = sql("SELECT team_id FROM Team WHERE league_id = %s ORDER BY team_id LIMIT 2", (self.league,))
-        self.home, self.away = [row['team_id'] for row in teams]
+        with database.db() as conn:
+            self.league = conn.execute("""INSERT INTO League (sport_id, category, skill_level, term, start_date, end_date, reg_open_at, reg_close_at, roster_lock_date)
+                SELECT sport_id, 'Open', 'Rec', %s, CURRENT_DATE - 10, CURRENT_DATE + 10, NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day', CURRENT_DATE + 1
+                FROM Sport ORDER BY sport_id LIMIT 1 RETURNING league_id""", (uuid.uuid4().hex[:15],)).fetchone()['league_id']
+            teams = []
+            for index, pid in enumerate(('simvt0001', 'simvt0002')):
+                player = self.people[pid]
+                team = conn.execute("INSERT INTO Team (league_id, captain_id, team_name) VALUES (%s, %s, %s) RETURNING team_id", (self.league, player, f'Score test {index}')).fetchone()['team_id']
+                conn.execute("INSERT INTO RosterMembership (team_id, user_id, status, joined_at) VALUES (%s, %s, 'active', NOW())", (team, player))
+                teams.append(team)
+        self.home, self.away = teams
         self.facility = sql("INSERT INTO Facility (facility_name, location) VALUES (%s, 'Test') RETURNING facility_id",
                             ('Score test ' + uuid.uuid4().hex[:10],))[0]['facility_id']
         self.game = sql("""
@@ -77,6 +85,8 @@ class ScoreReportingTest(unittest.TestCase):
     def tearDown(self):
         sql("DELETE FROM Game WHERE game_id = %s", (self.game,))
         sql("DELETE FROM Facility WHERE facility_id = %s", (self.facility,))
+        sql("DELETE FROM Team WHERE league_id = %s", (self.league,))
+        sql("DELETE FROM League WHERE league_id = %s", (self.league,))
 
     def client_for(self, pid=None):
         client = TestClient(app, headers={'X-Requested-With': 'HokieRec'})
@@ -139,6 +149,28 @@ class ScoreReportingTest(unittest.TestCase):
         history = self.history()['reports']
         self.assertEqual([row['is_current'] for row in history], [True, False])
         self.assertEqual((history[0]['home_score'], history[0]['away_score']), (1, 5))
+
+    def test_bracket_blocks_only_corrections_that_change_seeds(self):
+        self.assertEqual(self.submit({'home_score': 2, 'away_score': 0}).status_code, 201)
+        bracket = sql("INSERT INTO Game (league_id, facility_id, home_team_id, away_team_id, start_time, end_time, playoff_round) VALUES (%s, %s, %s, %s, NOW() + INTERVAL '20 days', NOW() + INTERVAL '20 days 1 hour', 1) RETURNING game_id", (self.league, self.facility, self.home, self.away))[0]['game_id']
+        try:
+            self.assertEqual(self.submit({'home_score': 3, 'away_score': 0}).status_code, 201)
+            rejected = self.submit({'home_score': 0, 'away_score': 3})
+            self.assertEqual(rejected.status_code, 409)
+            self.assertIn('playoff seeds', rejected.json()['detail'])
+            self.assertEqual(len(self.reports()), 2)
+        finally:
+            sql('DELETE FROM Game WHERE game_id = %s', (bracket,))
+
+    def test_rename_cannot_change_bracket_seed_order(self):
+        bracket = sql("INSERT INTO Game (league_id, facility_id, home_team_id, away_team_id, start_time, end_time, playoff_round) VALUES (%s, %s, %s, %s, NOW() + INTERVAL '20 days', NOW() + INTERVAL '20 days 1 hour', 1) RETURNING game_id", (self.league, self.facility, self.home, self.away))[0]['game_id']
+        try:
+            captain = self.client_for('simvt0001')
+            response = captain.patch(f'/api/teams/{self.home}', json={'team_name': 'Zulu last'})
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(sql('SELECT team_name FROM Team WHERE team_id = %s', (self.home,))[0]['team_name'], 'Score test 0')
+        finally:
+            sql('DELETE FROM Game WHERE game_id = %s', (bracket,))
 
     def test_schedule_and_reports_use_latest_correction_once(self):
         before = self.standings()
@@ -313,6 +345,21 @@ class DemoScoreSeedTest(unittest.TestCase):
         self.assertEqual(sql('SELECT COUNT(*) AS n FROM ScoreReport WHERE game_id = %s', (first,))[0]['n'], 1)
         self.assertEqual(sql('SELECT COUNT(*) AS n FROM ScoreReport WHERE game_id = %s', (second,))[0]['n'], 0)
         self.assertEqual(sql('SELECT COUNT(*) AS n FROM Users')[0]['n'], 135)
+
+    def test_upcoming_demo_is_repeatable_and_preserves_existing_result(self):
+        from seed_score_demo import seed_score_demo
+        first = seed_score_demo()
+        with TestClient(app, headers={'X-Requested-With': 'HokieRec'}) as client:
+            self.assertEqual(client.post('/api/auth/login', json={'vt_pid': 'simvt0121', 'password': PASSWORD}).status_code, 200)
+            self.assertEqual(client.post(f'/api/games/{first}/score-reports', json={'home_score': 2, 'away_score': 1}).status_code, 201)
+        self.assertEqual(seed_score_demo(ensure_upcoming=True), first)
+        self.assertEqual(seed_score_demo(ensure_upcoming=True), first)
+        games = sql("""SELECT g.game_id, g.start_time > NOW() AS future, a.status, (g.start_time AT TIME ZONE 'America/New_York')::date BETWEEN l.start_date AND l.end_date AS in_season
+            FROM Game g JOIN League l USING (league_id) JOIN OfficiatingAssignment a USING (game_id)
+            JOIN Users u ON u.user_id = a.official_id WHERE l.term LIKE 'Scoring Demo %%' AND g.start_time > NOW() AND u.vt_pid = 'simvt0121'""")
+        self.assertEqual(len(games), 1)
+        self.assertEqual((games[0]['future'], games[0]['status'], games[0]['in_season']), (True, 'assigned', True))
+        self.assertEqual(sql('SELECT COUNT(*) AS n FROM ScoreReport WHERE game_id = %s', (first,))[0]['n'], 1)
 
 
 if __name__ == '__main__':

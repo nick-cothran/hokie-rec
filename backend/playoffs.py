@@ -129,6 +129,7 @@ def generate_bracket(league_id: int, body: NewBracket, admin: Admin):
 def remove_bracket(league_id: int, admin: Admin):
     """Removes a bracket nobody has played yet (and its officiating assignments)."""
     with db() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('hokie-rec:game-scheduling'))")
         games = conn.execute("""
             SELECT g.game_id, EXISTS (SELECT 1 FROM ScoreReport s WHERE s.game_id = g.game_id) AS scored
             FROM Game g WHERE g.league_id = %s AND g.playoff_round IS NOT NULL FOR UPDATE
@@ -161,11 +162,16 @@ def advance_winner(conn, game: dict, winner_id: int) -> None:
         "SELECT game_id FROM Game WHERE next_game_id = %s ORDER BY start_time, game_id", (next_id,)).fetchall()]
     slot = "home_team_id" if feeders.index(game["game_id"]) == 0 else "away_team_id"
     nxt = conn.execute(f"""
-        SELECT {slot} AS current, EXISTS (SELECT 1 FROM ScoreReport s WHERE s.game_id = g.game_id) AS scored
+        SELECT {slot} AS current, start_time, end_time, EXISTS (SELECT 1 FROM ScoreReport s WHERE s.game_id = g.game_id) AS scored
         FROM Game g WHERE g.game_id = %s FOR UPDATE
     """, (next_id,)).fetchone()
     if nxt["current"] == winner_id:
         return
     if nxt["scored"]:
         raise HTTPException(409, "The next round already has a result, so this correction can't change who advanced.")
+    if conn.execute("""
+        SELECT 1 FROM Game WHERE game_id <> %s AND status <> 'cancelled'
+          AND %s IN (home_team_id, away_team_id) AND start_time < %s AND end_time > %s LIMIT 1
+    """, (next_id, winner_id, nxt['end_time'], nxt['start_time'])).fetchone():
+        raise HTTPException(409, "The winning team has another game at the next round's time. Reschedule that game before submitting this result.")
     conn.execute(f"UPDATE Game SET {slot} = %s WHERE game_id = %s", (winner_id, next_id))

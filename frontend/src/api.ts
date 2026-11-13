@@ -45,8 +45,14 @@ export type League = {
   category: string
   skill_level: string
   term: string
+  start_date: string
+  end_date: string
   registration_open: boolean
+  registration_status: 'open' | 'upcoming' | 'closed'
+  reg_open_at: string
+  reg_close_at: string
   team_count: number
+  min_roster_size: number
 }
 
 export type TeamSummary = {
@@ -357,6 +363,7 @@ export type ScoreReport = {
 // GET /api/games/{id}/score-reports, for the game's officials and administrators
 export type ScoreSheet = {
   game: {
+    bracket_exists: boolean
     game_id: number
     league_id: number
     league_name: string

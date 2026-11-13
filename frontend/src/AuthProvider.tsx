@@ -36,6 +36,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     })
     setUser(current)
     setError('')
+    return current
   }
 
   async function signOut() {

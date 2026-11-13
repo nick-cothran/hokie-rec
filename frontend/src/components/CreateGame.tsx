@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, campusTime, query, useApi, type Facility, type League, type TeamSummary } from '../api'
+import { api, campusTime, formatDate, query, useApi, type Facility, type League, type TeamSummary } from '../api'
 import { useAuth } from '../auth'
 
 export default function CreateGame() {
@@ -18,6 +18,9 @@ export default function CreateGame() {
   const [end, setEnd] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const minimum = leagues.data?.find(item => String(item.league_id) === league)?.min_roster_size ?? 0
+  const selectedLeague = leagues.data?.find(item => String(item.league_id) === league)
+  const undersized = teams.data?.filter(team => [home, away].includes(String(team.team_id)) && team.member_count < minimum) ?? []
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -49,8 +52,10 @@ export default function CreateGame() {
       {(leagues.error || facilities.error || teams.error) && <p className="notice notice-error" role="alert">{leagues.error || facilities.error || teams.error}</p>}
       <form className="form-stack" onSubmit={submit}>
         <label className="field">League<select value={league} required disabled={busy || leagues.loading} onChange={e => { setLeague(e.target.value); setHome(''); setAway('') }}><option value="">Choose a league</option>{leagues.data?.map(l => <option key={l.league_id} value={l.league_id}>{l.league_name}</option>)}</select></label>
+        {selectedLeague && <p>Regular-season dates: {formatDate(selectedLeague.start_date)} – {formatDate(selectedLeague.end_date)}.</p>}
         <label className="field">Home team<select value={home} required disabled={busy || !league || teams.loading} onChange={e => setHome(e.target.value)}><option value="">Choose a team</option>{teams.data?.filter(t => t.status === 'active' && String(t.team_id) !== away).map(t => <option key={t.team_id} value={t.team_id}>{t.team_name}</option>)}</select></label>
         <label className="field">Away team<select value={away} required disabled={busy || !league || teams.loading} onChange={e => setAway(e.target.value)}><option value="">Choose a team</option>{teams.data?.filter(t => t.status === 'active' && String(t.team_id) !== home).map(t => <option key={t.team_id} value={t.team_id}>{t.team_name}</option>)}</select></label>
+        {undersized.length > 0 && <p className="notice notice-info">Below the minimum of {minimum} active players: {undersized.map(team => `${team.team_name} (${team.member_count})`).join(', ')}. Confirm their rosters before game day.</p>}
         {league && teams.data && teams.data.filter(t => t.status === 'active').length < 2 && <p className="notice notice-info">This league needs at least two active teams to schedule a game.</p>}
         <label className="field">Facility<select value={facility} required disabled={busy || facilities.loading} onChange={e => setFacility(e.target.value)}><option value="">Choose a facility</option>{facilities.data?.map(f => <option key={f.facility_id} value={f.facility_id}>{f.facility_name} — {f.location}</option>)}</select></label>
         <label className="field">Start<input type="datetime-local" required value={start} disabled={busy} onChange={e => setStart(e.target.value)} /></label>
