@@ -1,113 +1,128 @@
-# hokie-rec
+# Hokie Rec
 
-## Setup
+Hokie Rec is a web application for managing intramural sports leagues. Players can find leagues, form teams, manage rosters, and follow their games. Officials can manage assignments and report results, while administrators can organize leagues, schedules, and users.
 
-1. Create a `.env` file, and copy the contents of `.env.example` into it.
-2. Within the `/backend` folder, create a python venv, then run `pip install -r requirements.txt`
-3. Within the `/frontend` folder, run `npm install`
+The project was created for a database course and uses fictional data for its local demonstration.
 
-## Running the backend
+## Features
 
-1. With the docker engine running, run `docker compose up -d` from the root directory.
-2. To seed data, run `npm run seed` (fresh databases only).
+- **Accounts:** Sign up, sign in, sign out, edit a profile, and change a password. Administrators can create player, official, and administrator accounts.
+- **Leagues and teams:** Browse leagues and registration status, register a team, invite players, manage a roster, and follow team membership and games.
+- **Scheduling:** View games and scores. Administrators can create individual games, generate regular-season schedules, manage games, and assign officials.
+- **Officials and results:** Accept or decline assignments, submit game results or forfeits, and view result history. Corrections preserve earlier reports.
+- **Playoffs and incidents:** Generate and manage eligible playoff brackets, advance winners, file incident reports, and review incidents.
+- **Reports:** View league standings and participation summaries based on current application data.
 
-   **Account logins:** From `/backend` with the venv active, run:
+## Screenshots
 
-   ```powershell
-   python migrate.py
-   python -m seeds.seed_demo_accounts --development
-   ```
+<!-- Add screenshots to docs/screenshots/ and replace these placeholders with Markdown image links. -->
 
-   `migrate.py` brings an existing database up to date, including membership history and scheduling rules; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. Existing roster rows provide at most their most recent membership period; older overwritten periods cannot be recovered. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. The administrators are `simvt0133`–`simvt0135`; sign in as one and open **Admin** to create officials and other administrators. Anyone can change their password from **Account**. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
+### Home
 
-   **Profile:** Open **Account** to edit your first name, last name, email, and optional phone number. Saved names appear immediately in the header and on rosters. PID and role are read-only; password changes remain available on the profile page. No additional migration or seeding is needed.
+![Home page](docs/screenshots/home-screen.png)
 
-   **Schedule a game:** Sign in as an administrator and open **Schedule → Schedule a game**. Choose two active teams in the same league, a facility, and future start/end times in Blacksburg (Eastern) time. Regular-season games must fit within the league's season dates. The application checks for overlapping team and facility bookings and warns about undersized rosters. The Schedule page also offers round-robin generation, game management, and official assignments. Once a playoff bracket exists, remove it before adding regular-season games. Individual playoff games cannot be rescheduled; manage the bracket from its league page.
+### Leagues
 
-   **Upcoming demo game:** To add an upcoming game for player `simvt0001` and official `simvt0121` without replacing existing games or results, run `python -m seeds.seed_score_demo --development --upcoming` from `/backend`. Rerunning it reuses an existing upcoming demo assignment when available.
+![League screen with sport and term filters](docs/screenshots/leagues-page.png)
 
-   **Results and playoffs:** A replacement official can be assigned to a completed game for a correction. If a regular-season correction would change an existing bracket's seeds, remove the unplayed bracket first, then make the correction and regenerate it. A bracket with playoff results cannot be removed. If advancing a winner would overlap another game for that team, an administrator must reschedule the conflicting game before the official can submit the result.
+### Teams
 
-3. From `/backend` (venv active), run `uvicorn main:app --reload`. The terminal prints the DB connection on startup.
-4. Open http://localhost:8000/docs to try every endpoint in the browser.
-5. Tests: `python -m unittest` from `/backend`. They build a throwaway schema from `db/*.sql` inside the dev database and drop it afterwards, so your data is untouched.
+![Teams Page](docs/screenshots/teams-page.png)
 
-   **Demo walkthrough (no SQL needed):** the seed is dated so every feature can be shown through the app, as of mid-November 2026:
+### Schedule Page
 
-   - **Register a team:** six Spring 2027 leagues (one per Fall sport) opened registration on Nov 1. Sign in as any player, e.g. `simvt0001`.
-   - **Enter a result:** the Fall semifinals (Oct 19–24) are over but unscored. Sign in as an official, e.g. `simvt0121`, open **Schedule** and click **Enter result** on a semifinal. Submitting again records a correction; the history keeps every report.
-   - **Accept or decline an assignment:** the Fall championship games are on Dec 5–6. As the same official, use **Accept** / **Decline** on the final.
-   - **Playoffs:** each Fall league page shows its bracket. After a semifinal result is entered, the winner appears in the final. To generate a bracket, sign in as an admin (`simvt0133`), open a Fall league, click **Remove bracket** (allowed while no playoff game has a result), then pick the bracket size, facility and start time and click **Generate bracket**. Teams are seeded from the standings (1 vs 4, 2 vs 3).
+![Schedule Page](docs/screenshots/schedule-page.png)
 
-   After pulling a seed change, rebuild your local database so you get the new dates: `docker compose down -v`, then repeat steps 1–2 (this deletes local data).
+### Admin Page
 
-   If registering a team fails with `null value in column "status"`, your Docker volume predates the schema's column defaults. Recreate it (this deletes local data): `docker compose down -v`, then repeat steps 1–2.
+![Admin Page showing creation of employee accounts](docs/screenshots/admin-page.png)
 
-## API (base URL `http://localhost:8000`)
+### Reports
 
-Sign in first: the browser keeps a session cookie, and every write also needs the `X-Requested-With: HokieRec` header (the frontend's `api()` adds it). "Captain" means the captain of that team.
+![Reports screen showing standings](docs/screenshots/reports.png)
 
-| Method | Path | Body / query | Who | Notes |
-|---|---|---|---|---|
-| POST | `/api/auth/sign-up` | `{vt_pid, first_name, last_name, email, phone, password}` | anyone | Creates a player and signs in. 201 |
-| POST | `/api/auth/login` | `{vt_pid, password}` | anyone | 200 → user; 429 after 10 failed tries in 15 min |
-| GET | `/api/auth/me` | | signed in | Current user; 401 if not signed in |
-| GET | `/api/me/profile` | | signed in | Own PID, name, contact details, role and join date. Private; never returns credentials or disciplinary information |
-| PUT | `/api/me/profile` | `{first_name, last_name, email, phone}` | signed in | Updates only your own name/contact details. Send `phone: null` to remove it. 409 duplicate email; 422 invalid or extra fields. PID, role, and password cannot be changed here |
-| POST | `/api/auth/logout` | | anyone | 204 |
-| POST | `/api/auth/password` | `{current_password, new_password}` | signed in | New password 12–128 characters. 400 if the current password is wrong or unchanged; 429 after 10 wrong tries in 15 min. Signs out your other browsers and rotates this one's session. 204 |
-| POST | `/api/auth/password/verify` | `{current_password}` | signed in | Checks the current password for the first step of changing it; shares the password-change attempt limit. 204 |
-| GET | `/api/admin/users` | | admin | Every account: PID, name, email, role, `is_active`, `created_at` (never password hashes) |
-| POST | `/api/admin/users` | `{vt_pid, first_name, last_name, email, phone, role, password}` | admin | Creates a `player`, `official` or `admin` with an initial password (same rules as sign-up). The admin stays signed in. 409 duplicate PID/email. 201 → user |
-| GET | `/api/admin/facilities` | | admin | Facilities available for scheduling |
-| GET | `/api/admin/officials` | | admin | Active officials (`user_id`, name, `vt_pid`) to choose from when assigning |
-| POST | `/api/admin/assignments` | `{game_id, official_id, position?}` | admin | Assigns an active official to a scheduled game, including one already started, or a completed game for a correction; `position` defaults to `referee`. Rejects duplicates and overlapping scheduled assignments. 201 → assignment |
-| GET | `/api/admin/players` | `?q=` (optional) | admin | Up to 100 players whose PID or name matches, with `is_active` and a current `suspended_until` (past suspensions show as null) |
-| PATCH | `/api/admin/players/{player_id}/suspension` | `{suspended_until}` | admin | Suspends a player through a campus date (today or later), or `null` to lift it. A suspended player can't register or join teams. 404 if not a player; 422 past date. 204 |
-| POST | `/api/admin/games` | `{league_id, facility_id, home_team_id, away_team_id, start_time, end_time}` | admin | Creates a regular-season game; times must include a time zone. 409 if a team or facility overlaps another game. 201 → `{game_id}` |
-| POST | `/api/admin/leagues/{league_id}/playoffs` | `{team_count: 2\|4\|8, facility_id, start_time, days_between_rounds?}` | admin | Generates a single-elimination bracket from the regular-season standings (1 vs N, …; higher seed at home). Round 1 runs back to back on the facility from `start_time` (game length = the league's usual regular-season length, 30 min turnover); later rounds follow every `days_between_rounds` days (default 7) with teams TBD. 409 if the league already has a bracket, a regular-season game has no result, there are too few active teams, or the facility/a team is booked. 201 → `{seeds, games}` |
-| DELETE | `/api/admin/leagues/{league_id}/playoffs` | | admin | Removes a bracket before any playoff result is entered (its assignments go too). 409 once a result exists. 204 |
-| GET | `/api/health` | | anyone | `{status, version, database, leagues, teams}` |
-| GET | `/api/leagues` | `?sport=Soccer&term=Fall 2026` (both optional) | anyone | S1. Leagues with `team_count` |
-| GET | `/api/teams` | `?league_id=1` (optional) | anyone | Team directory with league, captain and `member_count` |
-| GET | `/api/me/teams` | | signed in | Teams where the current user is an active roster member, including whether they are captain |
-| GET | `/api/me/membership-history` | | signed in | Membership periods, including teams the player left and deleted teams |
-| GET | `/api/teams/{team_id}/eligibility` | | captain or admin | Private suspension flags for active roster members |
-| POST | `/api/teams` | `{league_id, team_name}` | active player | S2. You become captain. 409 outside the registration window or if you're already on a team in that league. 201 → `{team_id}` |
-| GET | `/api/teams/{team_id}` | | anyone | Team, league roster limits (`min_roster_size`, `max_roster_size`, `roster_lock_date`, `roster_locked`) and `roster` |
-| PATCH | `/api/teams/{team_id}` | `{team_name}` | captain | S3. 200 → `{team_id, team_name}` |
-| DELETE | `/api/teams/{team_id}` | | captain | Roster rows cascade; 409 if the team has games. 204 |
-| POST | `/api/teams/{team_id}/invites` | `{vt_pid}` | captain | Invite by PID before the lock date. 404 unknown PID; 409 if already invited/on the team, suspended, or on another team in the league. Reuses a former member's row. 201 |
-| DELETE | `/api/teams/{team_id}/invites/{player_id}` | | captain | S4. Withdraw a pending invite, any time. A former member's withdrawn re-invite is kept as `removed`. 204 |
-| GET | `/api/me/invites` | | signed in | Your pending invites with team, league, captain, `active_count`, `max_roster_size`, lock date |
-| POST | `/api/teams/{team_id}/invite/accept` | | invitee | Join before the lock date if the team isn't full; declines your other pending invites in that league. 204 |
-| POST | `/api/teams/{team_id}/invite/decline` | | invitee | Any time. 204 |
-| DELETE | `/api/teams/{team_id}/members/{player_id}` | | captain | Remove an active member (not the captain) before the lock date; row kept as `removed`. 204 |
-| POST | `/api/teams/{team_id}/leave` | | active member | Leave before the lock date; the captain must hand off first. 204 |
-| PUT | `/api/teams/{team_id}/captain` | `{user_id}` | captain | Hand off to an active member, any time. 200 → `{team_id, captain_id}` |
-| GET | `/api/games` | `?league_id=1&team_id=4` (both optional) | anyone | Schedule and results, oldest first. Teams are null for an undecided playoff game; scores come from the game's newest score report; `playoff_rounds` is the league's bracket size in rounds, for naming a round |
-| GET | `/api/me/games` | | signed in | Upcoming/in-progress games, and the five most recent games that have ended (scored or still awaiting a result; cancelled ones left out), for the current user's active teams |
-| GET | `/api/me/assignments` | | signed in | Your officiating assignments with game details, `assignment_status`, `can_respond` and `has_ended` (the game is over, so its result can be entered); `[]` for non-officials |
-| GET | `/api/games/{game_id}/score-reports` | | game's officials, admins | The game, every submitted report (newest is `is_current`), `can_submit` and `blocked_reason` |
-| POST | `/api/games/{game_id}/score-reports` | `{home_score, away_score}` or `{forfeit_team_id}` | assigned official | After the game's scheduled end, with both teams decided, unless you declined. A later report is a correction; earlier ones are kept. Marks the game `completed`. A playoff game can't end in a tie; its winner (or a forfeit's opponent) moves into the next game: the feeder that starts first fills the home slot. A correction can change who advanced only until the next game has a result (409). 201 |
-| POST | `/api/assignments/{assignment_id}/accept` | | assigned official | Only while `assigned` and before the game starts. 404 if it isn't yours; 409 if already answered or started. 204 |
-| POST | `/api/assignments/{assignment_id}/decline` | | assigned official | Same rules as accept. A declined official can't submit the game's score. 204 |
-| GET | `/api/incidents` | | official or admin | Private reports: an official sees reports they filed; admins see all reports |
-| POST | `/api/games/{game_id}/incident-reports` | `{incident_type, description, involved_user_pid?}` | assigned official | Files an open report for an assigned game; optional PID identifies an involved user. 201 |
-| PATCH | `/api/incidents/{incident_id}` | `{status: "reviewed" \| "dismissed"}` | admin | Resolves an open report and records the reviewing administrator. 409 if already resolved |
-| GET | `/api/reports/standings` | `?league_id=1` | anyone | Report 1. Regular-season W/L/T and points per team; forfeit = loss for the forfeiting team. 404 if no league |
-| GET | `/api/reports/participation` | `?term=Fall 2026` (optional) | anyone | Report 2. Teams, active players, pending invites, avg roster, games played/left per league |
+## Technology
 
-Schema (Phase III): roster limits live on `Sport`; a league's display name (`league_name`, e.g. "Coed Soccer, Recreational, Fall 2026") and its sport's limits come from the `LeagueView` view. A game is a playoff game when `playoff_round` is set, a score report is a forfeit when `forfeit_team_id` is set, and standings use the newest report per game (`LatestScoreReport` view). Triggers in `db/phase3.sql` enforce that only the game's assigned official (not one who declined) submits a score report, reports are never edited, a forfeit names one of the game's teams, a game's teams play in its league, officials are assigned and file incidents, and admins assign officials and review incidents. Check constraints limit each `status` column to its known values and require a score report to hold a result (a forfeit, or both scores).
+| Layer          | Technologies                                                      |
+| -------------- | ----------------------------------------------------------------- |
+| Frontend       | React, TypeScript, Vite                                           |
+| Backend        | Python, FastAPI, psycopg                                          |
+| Database       | PostgreSQL 17, Docker Compose                                     |
+| Authentication | Server-side sessions and Argon2 password hashing through `pwdlib` |
 
-Incident reports are private to assigned officials and administrators. Officials may file reports for games assigned to them unless they declined or the game was cancelled. Administrators may mark an open report reviewed or dismissed; resolved reports cannot be changed through the API.
+## Local setup
 
-Roster statuses: `invited` → `active`, `declined`, `removed` or `left`. Two database triggers (`db/roster.sql`) also enforce that a captain is always an active member of their team and that a player is active on at most one team per league.
+### Prerequisites
 
-Errors always come back as `{"detail": "readable message"}`: 401 not signed in, 403 not allowed, 404 not found, 409 a broken rule (e.g. duplicate team name, roster locked, team full), 422 bad input.
+- Python and `pip`
+- Node.js and npm
+- Docker with Docker Compose
 
-## Running the frontend
+The following commands use PowerShell and start in the project root. On macOS or Linux, use the equivalent commands for copying `.env.example` and activating the virtual environment.
 
-1. `cd frontend`
-2. `npm install`
-3. `npm run dev`, then open http://localhost:5173 (the backend only allows this origin)
+### 1. Configure the environment
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The example configuration is for local development. The database password in `DATABASE_URL` must match `POSTGRES_PASSWORD`. The default frontend origin is `http://localhost:5173`.
+
+### 2. Create the database and add sample data
+
+Start Docker, then run:
+
+```powershell
+docker compose up -d
+npm run seed
+```
+
+On a new Docker volume, PostgreSQL initializes the schema from the scripts in `db/`. Run the seed command **once on a fresh database**; it adds fictional sample data and is not intended to be rerun on the same data.
+
+### 3. Set up and start the backend
+
+In a terminal at the project root:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python migrate.py
+python -m seeds.seed_demo_accounts --development
+uvicorn main:app --reload
+```
+
+The backend runs at `http://localhost:8000`; interactive API documentation is available at `http://localhost:8000/docs`. The migration command updates an existing compatible database and can be rerun. On a newly initialized database, it ensures the same migrations are in place.
+
+### 4. Set up and start the frontend
+
+In a second terminal at the project root:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Keep both the frontend and backend terminals running while using the application.
+
+## Demo accounts and data
+
+The account-seeding command creates credentials for the fictional users in the sample data. The default demo password is **`hokie`**. These shared credentials are intended only for local development and demonstrations.
+
+| Role          | Example PID | Starting point                         |
+| ------------- | ----------- | -------------------------------------- |
+| Player        | `simvt0001` | Teams and personal games               |
+| Official      | `simvt0121` | Assignments and score entry            |
+| Administrator | `simvt0133` | Administration and schedule management |
+
+Account seeding preserves existing credentials by default, so an account whose password has already been changed may not use the default. To choose a different shared demo password when provisioning accounts, use `python -m seeds.seed_demo_accounts --development --custom-password`. Adding `--reset` replaces seeded users' passwords and revokes their sessions; it does not reset accounts created through signup.
+
+Sample league registration windows and games have specific dates, so availability changes over time. To set up a game for trying score entry and an upcoming game for the demo player and official, run this from `backend/` with the virtual environment active:
+
+```powershell
+python -m seeds.seed_score_demo --development --upcoming
+```
+
+The command preserves existing games and results and prints the demo game information. The upcoming game must fit within the demo league's season and an available time slot.
