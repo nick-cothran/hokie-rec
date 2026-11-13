@@ -37,6 +37,7 @@ function SignIn() {
     setError("");
     try {
       await signOut();
+      navigate("/", { replace: true });
     } catch (failure) {
       setError((failure as Error).message);
     } finally {

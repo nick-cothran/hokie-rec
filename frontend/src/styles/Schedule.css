@@ -25,6 +25,10 @@
 .personal-games-list a:not(.button) { color: var(--ink); text-decoration: none; }
 .personal-games-list a:hover { color: var(--orange-dark); text-decoration: underline; }
 .admin-assignment-form { align-items: end; }
+.admin-create-game { display: grid; gap: 0.5rem; }
+.admin-create-game-intro { margin: 0; }
+.admin-create-game-intro h2 { margin: 0; font-size: 1.4rem; }
+.schedule-page .admin-schedule-tools { margin-top: 0; }
 .official-assignments > h2 { margin: 0 0 1rem; font-size: 1.45rem; }
 .assignment-group { margin-top: 1rem; }
 .assignment-group h3 { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.75rem; font-size: 1rem; }

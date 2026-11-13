@@ -6,6 +6,7 @@ import { api, campusTime, forfeitLabel, formatDate, formatGameTime as when, game
 import { useAuth } from '../auth'
 import GenerateSchedule from './GenerateSchedule'
 import Pagination from './Pagination'
+import CreateGame from './CreateGame'
 import { paginate } from '../pagination'
 import ViewTabs from './ViewTabs'
 
@@ -285,15 +286,24 @@ function Schedule() {
   const { user } = useAuth()
   const location = useLocation()
   const [params, setParams] = useSearchParams()
+  const adminTabs = [
+    { id: 'create', label: 'Schedule a game' },
+    { id: 'manage', label: 'Manage league schedules' },
+    { id: 'league', label: 'League schedule' },
+  ] as const
+  type AdminTab = typeof adminTabs[number]['id']
+  const requestedAdminTab = params.get('admin_tab')
+  const adminTab: AdminTab = adminTabs.some(tab => tab.id === requestedAdminTab) ? requestedAdminTab as AdminTab : 'league'
   const [coverageRevision, setCoverageRevision] = useState(0)
   const leagues = useApi<League[]>('/api/leagues')
   const leagueId = params.get('league') ?? String(leagues.data?.find(l => l.team_count > 0)?.league_id ?? '')
   const teamId = params.get('team') ?? ''
+  const isAdmin = user?.role === 'admin'
   const hasPersonalSchedule = user?.role === 'player' || user?.role === 'official'
   const selectedView = params.get('view')
   const showPersonal = hasPersonalSchedule && (selectedView === 'mine' || (selectedView !== 'all' && !params.has('league') && !params.has('team') && !params.has('page')))
   const selectedLeague = leagues.data?.find(item => String(item.league_id) === leagueId)
-  const games = useApi<Game[]>(leagueId ? `/api/games${query({ league_id: leagueId })}` : null)
+  const games = useApi<Game[]>(leagueId && (user?.role !== 'admin' || adminTab !== 'create') ? `/api/games${query({ league_id: leagueId })}` : null)
   const visibleGames = teamId ? games.data?.filter(game => String(game.home_team_id) === teamId || String(game.away_team_id) === teamId) : games.data
   const gamePage = paginate(visibleGames ?? [], params.get('page'))
   const generatorReason = games.data?.some(game => game.playoff_round !== null)
@@ -312,6 +322,13 @@ function Schedule() {
     next.set('view', view)
     setParams(next)
   }
+  function setAdminView(view: AdminTab) {
+    const next = new URLSearchParams(params)
+    next.set('admin_tab', view)
+    next.delete('page')
+    next.delete('team')
+    setParams(next)
+  }
 
   return (
     <main className="content-page schedule-page">
@@ -322,21 +339,31 @@ function Schedule() {
       </div>
 
       {location.state?.notice && <p className="notice notice-success" role="status">{location.state.notice}</p>}
-      {user?.role === 'admin' && <p className="form-row"><Link className="button button-primary" to="/admin/games/new">Schedule a game</Link>{leagueId && <a className="text-link" href="#manage-schedule-heading">Manage league schedule ↓</a>}</p>}
+      {user?.role === 'admin' && <nav className="view-tabs admin-schedule-tabs" aria-label="Schedule administration">
+        {adminTabs.map(tab => <button key={tab.id} type="button" className="view-tab" aria-pressed={adminTab === tab.id} onClick={() => setAdminView(tab.id)}>{tab.label}</button>)}
+      </nav>}
 
       {hasPersonalSchedule && <ViewTabs label="Schedule views" personalLabel={user?.role === 'official' ? 'Your assignments' : 'Your games'} allLabel="League schedule" value={showPersonal ? 'mine' : 'all'} onChange={setView} />}
       {showPersonal && user?.role === 'official' && <Assignments />}
       {showPersonal && user?.role === 'player' && <YourGames key={user.user_id} />}
-      {!showPersonal && <>
+      {user?.role === 'admin' && adminTab === 'create' && <CreateGame embedded />}
+      {!showPersonal && !(user?.role === 'admin' && adminTab === 'create') && <>
       <form className="filters" onSubmit={e => e.preventDefault()}>
         <label className="field">League
-          <select value={leagueId} onChange={e => setParams({ league: e.target.value, ...(hasPersonalSchedule ? { view: 'all' } : {}) }, { replace: true })}>
+          <select value={leagueId} onChange={e => {
+            const next = new URLSearchParams(params)
+            next.set('league', e.target.value)
+            next.delete('team')
+            next.delete('page')
+            if (hasPersonalSchedule) next.set('view', 'all')
+            setParams(next, { replace: true })
+          }}>
             {leagues.data?.map(l => <option key={l.league_id} value={l.league_id}>{l.league_name}</option>)}
           </select>
         </label>
       </form>
       {user?.role === 'admin' && selectedLeague && <p>Regular-season dates: {formatDate(selectedLeague.start_date)} – {formatDate(selectedLeague.end_date)}.</p>}
-      <section>
+      {(!isAdmin || adminTab === 'league') && <section>
         <h2>League schedule</h2>
         {teamId && <p>Showing games for the selected team. <Link className="text-link" to={`/schedule?league=${leagueId}`}>Show all league games</Link></p>}
         {(leagues.error || games.error) && <p className="notice notice-error" role="alert">{leagues.error || games.error}</p>}
@@ -372,8 +399,8 @@ function Schedule() {
             <Pagination page={gamePage.page} pageCount={gamePage.pageCount} onPageChange={setPage} />
           </>
         )}
-      </section>
-      {user?.role === 'admin' && leagueId && <section className="admin-schedule-tools" aria-labelledby="manage-schedule-heading">
+      </section>}
+      {user?.role === 'admin' && adminTab === 'manage' && leagueId && <section className="admin-schedule-tools" aria-labelledby="manage-schedule-heading">
         <h2 id="manage-schedule-heading">Manage this league</h2>
         <details className="schedule-tool"><summary>Generate a regular-season schedule</summary>
           {games.error ? <p className="notice notice-error">{games.error}</p> : games.data ? <GenerateSchedule key={leagueId} leagueId={leagueId} minimum={selectedLeague?.min_roster_size ?? 0} unavailableReason={generatorReason} onCreated={refreshGames} /> : <p>Loading league schedule…</p>}

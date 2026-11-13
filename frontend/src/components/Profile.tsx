@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { formatCampusDate, roleLabels, useApi, type Profile as AccountProfile, type ProfileDetails } from '../api'
 import { useAuth } from '../auth'
 import ChangePassword from './ChangePassword'
@@ -126,6 +126,7 @@ function ProfileForm({ profile }: { profile: AccountProfile }) {
 
 export default function Profile() {
   const { user, loading: checkingSession, error: sessionError, signOut } = useAuth()
+  const navigate = useNavigate()
   const response = useApi<AccountProfile>(user ? '/api/me/profile' : null)
   const profile = !response.error && user && response.data?.user_id === user.user_id ? response.data : undefined
   const [signingOut, setSigningOut] = useState(false)
@@ -134,7 +135,10 @@ export default function Profile() {
   async function logout() {
     setSigningOut(true)
     setSignOutError('')
-    try { await signOut() } catch (failure) { setSignOutError((failure as Error).message) }
+    try {
+      await signOut()
+      navigate('/', { replace: true })
+    } catch (failure) { setSignOutError((failure as Error).message) }
     finally { setSigningOut(false) }
   }
 
@@ -174,7 +178,6 @@ export default function Profile() {
               <div><dt>Role</dt><dd>{roleLabels[profile.role]}</dd></div>
               <div><dt>Joined</dt><dd>{formatCampusDate(profile.created_at)}</dd></div>
             </dl>
-            {user.role === 'admin' && <Link className="text-link" to="/admin/users">Manage accounts →</Link>}
           </section>
           <ProfileForm key={profile.user_id} profile={profile} />
           {user.role === 'player' && <TeamHistory key={user.user_id} />}

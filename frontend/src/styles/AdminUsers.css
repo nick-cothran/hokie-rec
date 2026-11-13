@@ -2,8 +2,17 @@
 .admin-form-grid .field input, .admin-form-grid .field select { min-width: 0; }
 .admin-form-grid:disabled { opacity: 0.7; }
 .admin-form-actions { grid-column: 1 / -1; }
+.admin-password-row { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1rem; }
+.admin-password-row .field input { min-width: 0; }
+.admin-password-row > small { color: var(--ink-soft); font-size: 0.8rem; }
+.admin-setup-cards { display: grid; gap: 1.25rem; }
+.admin-setup-cards .panel h2 { margin-bottom: 1rem; }
+.admin-tabs { margin-bottom: 1.25rem; }
+.setup-form-grid { width: min(100%, 900px); max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.setup-form-grid .field input, .setup-form-grid .field select { min-width: 0; }
+.setup-form-grid > .form-row { grid-column: 1 / -1; }
 .pill-role-official { background: #e8f0fb; color: #1d4f91; }
 .pill-role-admin { background: #172b4d; color: white; }
 .admin-users-page .data-table td { white-space: nowrap; }
 
-@media (max-width: 600px) { .admin-form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .admin-form-grid, .setup-form-grid, .admin-password-row { grid-template-columns: 1fr; } }

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, campusTime, formatDate, query, useApi, type Facility, type League, type TeamSummary } from '../api'
 import { useAuth } from '../auth'
 
-export default function CreateGame() {
+export default function CreateGame({ embedded = false }: { embedded?: boolean } = {}) {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
@@ -45,9 +45,9 @@ export default function CreateGame() {
   if (loading) return <main className="content-page"><p>Checking your session…</p></main>
   if (!isAdmin) return <main className="content-page"><section className="empty-state"><h1>Administrators only</h1><p>Sign in as an administrator to schedule a game.</p>{!user && <Link className="button button-primary" to="/sign-in?next=%2Fadmin%2Fgames%2Fnew">Sign in</Link>}</section></main>
 
-  return <main className="content-page detail-page">
-    <Link className="back-link" to="/schedule">← Schedule</Link>
-    <div className="page-intro"><h1>Schedule a game.</h1><p>Choose the teams, facility, and time for a regular-season game.</p></div>
+  const content = <>
+    {!embedded && <Link className="back-link" to="/schedule">← Schedule</Link>}
+    <div className={embedded ? 'page-intro admin-create-game-intro' : 'page-intro'}>{embedded ? <h2>Schedule a game</h2> : <h1>Schedule a game.</h1>}{!embedded && <p>Choose the teams, facility, and time for a regular-season game.</p>}</div>
     <section className="panel">
       {(leagues.error || facilities.error || teams.error) && <p className="notice notice-error" role="alert">{leagues.error || facilities.error || teams.error}</p>}
       <form className="form-stack" onSubmit={submit}>
@@ -64,5 +64,6 @@ export default function CreateGame() {
         <div className="form-row"><button className="button button-primary" disabled={busy || !league || !home || !away || !facility || !start || !end}>{busy ? 'Scheduling…' : 'Schedule game'}</button><Link className="button button-outline" to="/schedule">Cancel</Link></div>
       </form>
     </section>
-  </main>
+  </>
+  return embedded ? <div className="admin-create-game">{content}</div> : <main className="content-page detail-page">{content}</main>
 }

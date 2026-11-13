@@ -2,7 +2,10 @@ import '../styles/IncidentReports.css'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, campusToday, formatDate, formatGameTime, query, useApi, type AdminPlayer, type Assignment, type IncidentReport } from '../api'
+import { paginate } from '../pagination'
 import { useAuth } from '../auth'
+import Pagination from './Pagination'
+import '../styles/ViewTabs.css'
 
 const when = (iso: string) => formatGameTime(iso, { year: 'numeric' })
 
@@ -116,53 +119,59 @@ function IncidentList({ reports, isAdmin, onDecided }: {
     }
   }
 
+  const openReports = isAdmin ? reports.filter(report => report.status === 'open') : reports
+  const reviewedReports = isAdmin ? reports.filter(report => report.status !== 'open') : []
+
+  function reportCards(items: IncidentReport[]) {
+    return <ul className="incident-list">
+      {items.map(report => (
+        <li className="panel incident-card" key={report.incident_id}>
+          <div className="incident-card-heading">
+            <div>
+              <p className="eyebrow">{report.incident_type.replaceAll('_', ' ')}</p>
+              <h3>{matchName(report)}</h3>
+            </div>
+            <span className={`pill pill-${report.status}`}>{report.status}</span>
+          </div>
+          <p className="incident-description">{report.description}</p>
+          <ul className="meta-list">
+            <li><Link to={`/leagues/${report.league_id}`}>{report.league_name}</Link></li>
+            <li>{when(report.start_time)} · {report.facility_name}</li>
+            <li>Filed by {report.filed_by_first_name} {report.filed_by_last_name} on {when(report.filed_at)}</li>
+            {report.involved_user_id !== null && <li>Involved: {report.involved_first_name} {report.involved_last_name}</li>}
+            {report.reviewed_by_first_name && <li>Reviewed by {report.reviewed_by_first_name} {report.reviewed_by_last_name}</li>}
+          </ul>
+          {isAdmin && report.status === 'open' && <div className="form-row incident-actions">
+            <button className="button button-primary button-small" type="button" disabled={busy !== null}
+              onClick={() => decide(report, 'reviewed')}>{busy === report.incident_id ? 'Saving…' : 'Mark reviewed'}</button>
+            <button className="button button-outline button-small" type="button" disabled={busy !== null}
+              onClick={() => decide(report, 'dismissed')}>Dismiss</button>
+          </div>}
+        </li>
+      ))}
+    </ul>
+  }
+
   return (
     <section>
-      <div className="section-heading incident-list-heading"><h2>{isAdmin ? 'Review queue' : 'Reports you filed'}</h2></div>
+      <div className="section-heading incident-list-heading">
+        <h2>{isAdmin ? 'Open reports' : 'Reports you filed'}</h2>
+        {isAdmin && <span className="incident-queue-count">{openReports.length}</span>}
+      </div>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
-      {reports.length === 0 ? <p className="empty-state">No incident reports to show.</p> : (
+      {openReports.length === 0 ? <p className="empty-state">{isAdmin ? 'No open incident reports need review.' : 'No incident reports to show.'}</p> : (
         <>
-          <ul className="incident-list" id="incident-report-list">
-          {reports.slice(0, expanded ? reports.length : 3).map(report => (
-            <li className="panel incident-card" key={report.incident_id}>
-              <div className="incident-card-heading">
-                <div>
-                  <p className="eyebrow">{report.incident_type.replaceAll('_', ' ')}</p>
-                  <h3>{matchName(report)}</h3>
-                </div>
-                <span className={`pill pill-${report.status}`}>{report.status}</span>
-              </div>
-              <p className="incident-description">{report.description}</p>
-              <ul className="meta-list">
-                <li><Link to={`/leagues/${report.league_id}`}>{report.league_name}</Link></li>
-                <li>{when(report.start_time)} · {report.facility_name}</li>
-                <li>Filed by {report.filed_by_first_name} {report.filed_by_last_name} on {when(report.filed_at)}</li>
-                {report.involved_user_id !== null && (
-                  <li>Involved: {report.involved_first_name} {report.involved_last_name}</li>
-                )}
-                {report.reviewed_by_first_name && (
-                  <li>Reviewed by {report.reviewed_by_first_name} {report.reviewed_by_last_name}</li>
-                )}
-              </ul>
-              {isAdmin && report.status === 'open' && (
-                <div className="form-row incident-actions">
-                  <button className="button button-primary button-small" type="button" disabled={busy !== null}
-                    onClick={() => decide(report, 'reviewed')}>{busy === report.incident_id ? 'Saving…' : 'Mark reviewed'}</button>
-                  <button className="button button-outline button-small" type="button" disabled={busy !== null}
-                    onClick={() => decide(report, 'dismissed')}>Dismiss</button>
-                </div>
-              )}
-            </li>
-          ))}
-          </ul>
-          {!isAdmin && reports.length > 3 && (
-            <button className="history-toggle incident-history-toggle" type="button" aria-expanded={expanded} aria-controls="incident-report-list" onClick={() => setExpanded(value => !value)}>
-              {expanded ? 'Show less' : `Show all ${reports.length} reports`}
-              <svg className={expanded ? 'history-chevron expanded' : 'history-chevron'} aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 6 4 4 4-4" /></svg>
-            </button>
-          )}
+          {reportCards(isAdmin ? openReports : openReports.slice(0, expanded ? openReports.length : 3))}
+          {!isAdmin && openReports.length > 3 && <button className="history-toggle incident-history-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+            {expanded ? 'Show less' : `Show all ${openReports.length} reports`}
+            <svg className={expanded ? 'history-chevron expanded' : 'history-chevron'} aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 6 4 4 4-4" /></svg>
+          </button>}
         </>
       )}
+      {isAdmin && reviewedReports.length > 0 && <details className="reviewed-reports">
+        <summary>Reviewed and dismissed reports <span className="pill">{reviewedReports.length}</span><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 6 4 4 4-4" /></svg></summary>
+        {reportCards(reviewedReports)}
+      </details>}
     </section>
   )
 }
@@ -179,7 +188,9 @@ function PlayerSuspensions() {
   const [suspendedUntil, setSuspendedUntil] = useState(() => campusDateAfter(7))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<number | null>(null)
+  const [page, setPage] = useState(1)
   const players = useApi<AdminPlayer[]>(`/api/admin/players${query({ q: term })}`)
+  const playerPage = paginate(players.data ?? [], String(page))
 
   async function update(player: AdminPlayer, until: string | null) {
     setBusy(player.user_id)
@@ -199,52 +210,52 @@ function PlayerSuspensions() {
 
   return (
     <section className="admin-player-tools" aria-labelledby="player-suspensions-heading">
-      <div className="section-heading"><h2 id="player-suspensions-heading">Player suspensions</h2></div>
-      <form className="filters" onSubmit={event => { event.preventDefault(); setTerm(search.trim()) }}>
-        <label className="field">Find a player
+      <div className="page-intro"><h2 id="player-suspensions-heading">Player suspensions.</h2><p>Find a player, choose an end date, then use the action on their row.</p></div>
+      <form className="filters suspension-filters" onSubmit={event => { event.preventDefault(); setTerm(search.trim()); setPage(1) }}>
+        <label className="field suspension-player-field">Find a player
           <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Name or VT PID" />
         </label>
-        <button className="button button-outline" type="submit">Search</button>
-      </form>
-      <div className="filters">
-        <label className="field">Suspend through
+        <label className="field suspension-date-field">Suspension end date
           <input type="date" min={campusToday()} value={suspendedUntil}
             onChange={event => setSuspendedUntil(event.target.value)} />
         </label>
-      </div>
+        <small className="suspension-date-help">Applied when you set or update a suspension.</small>
+        <button className="button button-primary suspension-search-button" type="submit">Find players</button>
+      </form>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {players.error && <p className="notice notice-error" role="alert">{players.error}</p>}
       {players.loading && !players.data && <p className="loading">Loading players…</p>}
       {players.data?.length === 0 && <p>No players found.</p>}
       {!!players.data?.length && (
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead><tr><th>Player</th><th>VT PID</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              {players.data.map(player => (
-                <tr key={player.user_id}>
-                  <td>{player.first_name} {player.last_name}</td>
-                  <td>{player.vt_pid}</td>
-                  <td>{!player.is_active ? 'Inactive' : player.suspended_until ? `Suspended through ${formatDate(player.suspended_until)}` : 'Active'}</td>
-                  <td>
-                    {player.is_active && (
-                      <div className="form-row suspension-actions">
-                        <button className="button button-outline button-small" type="button" disabled={busy !== null || !suspendedUntil}
-                          onClick={() => update(player, suspendedUntil)}>
-                          {player.suspended_until ? 'Update suspension' : 'Suspend'}
-                        </button>
-                        {player.suspended_until && (
-                          <button className="button button-outline button-small" type="button" disabled={busy !== null}
-                            onClick={() => update(player, null)}>Unsuspend</button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <p className="result-count">Showing {playerPage.start + 1}–{playerPage.end} of {players.data.length} players</p>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Player</th><th>VT PID</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                {playerPage.items.map(player => {
+                  const suspended = !!player.suspended_until && player.suspended_until >= campusToday()
+                  return <tr key={player.user_id}>
+                    <td>{player.first_name} {player.last_name}</td>
+                    <td>{player.vt_pid}</td>
+                    <td>{!player.is_active ? <span className="pill">Inactive</span> : suspended
+                      ? <span className="pill pill-suspended">Suspended through {formatDate(player.suspended_until!)}</span>
+                      : <span className="pill pill-active">Active</span>}</td>
+                    <td>{player.is_active && <div className="form-row suspension-actions">
+                      <button className="button button-outline button-small" type="button" disabled={busy !== null || !suspendedUntil}
+                        onClick={() => update(player, suspendedUntil)}>
+                        {busy === player.user_id ? 'Saving…' : suspended ? 'Update end date' : 'Set suspension'}
+                      </button>
+                      {suspended && <button className="button button-danger button-small" type="button" disabled={busy !== null}
+                        onClick={() => update(player, null)}>Lift suspension</button>}
+                    </div>}</td>
+                  </tr>
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pagination page={playerPage.page} pageCount={playerPage.pageCount} onPageChange={setPage} />
+        </>
       )}
       {players.data && players.data.length === 100 && <p className="result-count">Showing the first 100 matches. Search by a more specific name or PID.</p>}
     </section>
@@ -253,6 +264,7 @@ function PlayerSuspensions() {
 
 function IncidentReports() {
   const { user, loading } = useAuth()
+  const [adminTab, setAdminTab] = useState<'review' | 'suspensions'>('review')
   const isOfficial = user?.role === 'official'
   const isAdmin = user?.role === 'admin'
   const assignments = useApi<Assignment[]>(isOfficial ? '/api/me/assignments' : null)
@@ -268,6 +280,10 @@ function IncidentReports() {
         <h1>Incident reports.</h1>
         <p>Record and review incidents connected to league games.</p>
       </div>
+      {isAdmin && <nav className="view-tabs incident-admin-tabs" aria-label="Incident administration">
+        <button type="button" className="view-tab" aria-pressed={adminTab === 'review'} onClick={() => setAdminTab('review')}>Review queue</button>
+        <button type="button" className="view-tab" aria-pressed={adminTab === 'suspensions'} onClick={() => setAdminTab('suspensions')}>Player suspensions</button>
+      </nav>}
       {!user && (
         <section className="empty-state">
           <h2>Sign in to continue</h2>
@@ -280,14 +296,13 @@ function IncidentReports() {
       )}
       {isOfficial && assignments.loading && !assignments.data && <p className="loading">Loading your game assignments…</p>}
       {isOfficial && assignments.data && <FileIncidentForm assignments={assignments.data} onSubmitted={reports.reload} />}
-      {(assignments.error || reports.error) && (
-        <p className="notice notice-error" role="alert">{assignments.error || reports.error}</p>
-      )}
-      {(isOfficial || isAdmin) && reports.data && (
+      {isOfficial && assignments.error && <p className="notice notice-error" role="alert">{assignments.error}</p>}
+      {(isOfficial || (isAdmin && adminTab === 'review')) && reports.error && <p className="notice notice-error" role="alert">{reports.error}</p>}
+      {(isOfficial || (isAdmin && adminTab === 'review')) && reports.data && (
         <IncidentList reports={reports.data} isAdmin={isAdmin} onDecided={reports.reload} />
       )}
-      {isAdmin && <PlayerSuspensions />}
-      {reports.loading && !reports.data && <p className="loading">Loading incident reports…</p>}
+      {isAdmin && adminTab === 'suspensions' && <PlayerSuspensions />}
+      {(isOfficial || (isAdmin && adminTab === 'review')) && reports.loading && !reports.data && <p className="loading">Loading incident reports…</p>}
     </main>
   )
 }
