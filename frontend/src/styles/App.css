@@ -13,7 +13,7 @@
   color: var(--ink);
 }
 
-.content-page { flex: 1; width: min(1120px, 100%); margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+.content-page { flex: 1; width: min(1120px, 100%); margin: 0 auto; padding: 2.5rem 1.25rem 3.5rem; }
 .page-intro { margin-bottom: 1.8rem; }
 .page-intro h1 { margin: 0; font-family: 'Franklin Gothic Medium', 'Avenir Next', sans-serif; font-size: clamp(2.2rem, 4vw, 3.5rem); font-weight: 750; line-height: 0.98; }
 .page-intro p:not(.eyebrow) { margin: 0.75rem 0 0; color: var(--ink-soft); }
@@ -31,11 +31,13 @@
 .empty-state .button, .empty-state .text-link { margin-top: 1.25rem; }
 
 @media (max-width: 600px) {
-  .content-page { padding: 2rem 1rem 3rem; }
+  .content-page { padding: 1.65rem 0.9rem 2.5rem; }
   .intro-row { align-items: flex-start; flex-direction: column; }
 }
 /* Shared pieces for data screens */
 .stack { display: grid; gap: 1.25rem; }
+.section-heading { margin-bottom: 1.1rem; }
+.section-heading h2 { margin: 0; font-size: 1.5rem; line-height: 1.2; }
 .panel { padding: 1.5rem; border: 1px solid var(--line); background: var(--paper); }
 .panel h2 { margin: 0 0 1rem; font-size: 1.25rem; }
 .panel > p:not(.eyebrow) { margin: 0 0 1rem; color: var(--ink-soft); }
@@ -73,6 +75,23 @@
 .button-outline:hover { border-color: var(--orange); color: var(--orange-dark); }
 .button:disabled { cursor: not-allowed; opacity: 0.55; }
 .detail-page .back-link { display: inline-block; margin-bottom: 1.5rem; font-size: 0.85rem; }
+.detail-breadcrumb { margin-bottom: 0.75rem; }
+.detail-title-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1.5rem; }
+.detail-title-row h1 { flex: 1 1 28rem; min-width: 0; }
+.detail-page .page-intro { margin-bottom: 0; }
+.detail-top-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 1rem; margin-bottom: 0.9rem; }
+.detail-top-actions .detail-back { min-height: 32px; padding: 0.25rem 0.7rem; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--ink-soft); transition: border-color 150ms ease, color 150ms ease; }
+.detail-top-actions .detail-back:hover { border-color: var(--orange); color: var(--ink); text-decoration: none; }
+.detail-top-actions .detail-actions { gap: 0.25rem 1.25rem; margin-top: 0; }
+.detail-top-actions .detail-actions a { min-height: 32px; font-size: 0.92rem; }
+.league-detail-page .intro-row > div { flex: 1; min-width: 0; }
+.detail-back { display: inline-flex; align-items: center; gap: 0.45rem; min-height: 30px; color: var(--orange-dark); font-size: 0.85rem; font-weight: 700; text-decoration: none; }
+.detail-back span { font-size: 1rem; }
+.detail-back:hover { text-decoration: underline; }
+.detail-actions { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; margin-top: 1rem; }
+.detail-actions a { display: inline-flex; align-items: center; gap: 0.45rem; min-height: 38px; color: var(--orange-dark); font-size: 1rem; font-weight: 700; text-decoration: none; }
+.detail-actions a:hover { text-decoration: underline; }
+.detail-actions a:focus-visible, .detail-breadcrumb a:focus-visible { outline: 2px solid var(--orange-dark); outline-offset: 3px; }
 .danger-zone { border-color: #f1c4c4; }
 .button-danger { border-color: #d93c3c; background: white; color: #b42323; }
 .button-danger:hover { background: #d93c3c; color: white; }

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import ForeignKeyViolation, UniqueViolation
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from auth import SignUp, User, create_account, current_user
+from routers.auth import SignUp, User, create_account, current_user
 from database import db
 
 router = APIRouter(prefix="/api/admin", tags=["Administration"])

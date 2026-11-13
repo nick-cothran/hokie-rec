@@ -79,7 +79,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python migrate.py
-python seed_demo_accounts.py --development
+python -m seeds.seed_demo_accounts --development
 uvicorn main:app --reload
 ```
 
@@ -107,12 +107,12 @@ The account-seeding command creates credentials for the fictional users in the s
 | Official | `simvt0121` | Assignments and score entry |
 | Administrator | `simvt0133` | Administration and schedule management |
 
-Account seeding preserves existing credentials by default, so an account whose password has already been changed may not use the default. To choose a different shared demo password when provisioning accounts, use `python seed_demo_accounts.py --development --custom-password`. Adding `--reset` replaces seeded users' passwords and revokes their sessions; it does not reset accounts created through signup.
+Account seeding preserves existing credentials by default, so an account whose password has already been changed may not use the default. To choose a different shared demo password when provisioning accounts, use `python -m seeds.seed_demo_accounts --development --custom-password`. Adding `--reset` replaces seeded users' passwords and revokes their sessions; it does not reset accounts created through signup.
 
 Sample league registration windows and games have specific dates, so availability changes over time. To set up a game for trying score entry and an upcoming game for the demo player and official, run this from `backend/` with the virtual environment active:
 
 ```powershell
-python seed_score_demo.py --development --upcoming
+python -m seeds.seed_score_demo --development --upcoming
 ```
 
 The command preserves existing games and results and prints the demo game information. The upcoming game must fit within the demo league's season and an available time slot.

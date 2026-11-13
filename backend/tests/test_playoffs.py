@@ -11,9 +11,9 @@ from psycopg.conninfo import make_conninfo
 from fastapi.testclient import TestClient
 
 import database
-from auth import password_hasher
+from routers.auth import password_hasher
 from main import app
-from playoffs import bracket_order
+from routers.playoffs import bracket_order
 
 PASSWORD = "Playoff test password"
 BASE_URL = None
@@ -33,7 +33,7 @@ def setUpModule():
         conn.execute(pgsql.SQL("CREATE SCHEMA {}").format(pgsql.Identifier(TEST_SCHEMA)))
     database.DATABASE_URL = make_conninfo(BASE_URL, options=f"-c search_path={TEST_SCHEMA}")
     try:
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         with database.db() as conn:
             for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())

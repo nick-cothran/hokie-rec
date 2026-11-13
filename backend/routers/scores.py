@@ -5,9 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from auth import AuthenticatedUser
+from routers.auth import AuthenticatedUser
 from database import db
-from playoffs import advance_winner, playoff_winner
+from routers.playoffs import advance_winner, playoff_winner
 from standings import bracket_seed_order
 
 router = APIRouter(prefix="/api/games", tags=["Score reports"])

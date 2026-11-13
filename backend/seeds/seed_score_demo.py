@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from database import db
-from seed_demo_accounts import seed_demo_accounts
+from seeds.seed_demo_accounts import seed_demo_accounts
 
 OFFICIAL_PID = "simvt0121"
 ADMIN_PID = "simvt0133"

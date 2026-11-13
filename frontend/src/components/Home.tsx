@@ -27,8 +27,8 @@ function Home() {
         </div>
       </section>
       <section className="home-bottom-band">
-        <div><p className="eyebrow">Start playing</p><h2>New to intramurals?</h2><p>Get the basics on facilities, eligibility, and how league play works.</p></div>
-        <Link className="button button-light" to="/resources">Explore resources</Link>
+        <div><p className="eyebrow">Start playing</p><h2>New to intramurals?</h2><p>Browse leagues and find a team to join the action.</p></div>
+        <Link className="button button-light" to="/leagues">Explore leagues</Link>
       </section>
     </main>
   )

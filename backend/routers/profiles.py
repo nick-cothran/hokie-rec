@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from psycopg.errors import UniqueViolation
 
 from account_details import Email, Name, Phone
-from auth import AuthenticatedUser, User
+from routers.auth import AuthenticatedUser, User
 from database import db
 
 router = APIRouter(prefix="/api/me", tags=["Profile"])

@@ -47,7 +47,7 @@ export default function CreateGame() {
 
   return <main className="content-page detail-page">
     <Link className="back-link" to="/schedule">← Schedule</Link>
-    <div className="page-intro"><p className="eyebrow">Administration</p><h1>Schedule a game.</h1><p>Choose the teams, facility, and time for a regular-season game.</p></div>
+    <div className="page-intro"><h1>Schedule a game.</h1><p>Choose the teams, facility, and time for a regular-season game.</p></div>
     <section className="panel">
       {(leagues.error || facilities.error || teams.error) && <p className="notice notice-error" role="alert">{leagues.error || facilities.error || teams.error}</p>}
       <form className="form-stack" onSubmit={submit}>

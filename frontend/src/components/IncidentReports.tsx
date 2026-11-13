@@ -97,6 +97,7 @@ function IncidentList({ reports, isAdmin, onDecided }: {
 }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   async function decide(report: IncidentReport, status: 'reviewed' | 'dismissed') {
     if (status === 'dismissed' && !window.confirm('Dismiss this incident report? This action cannot be undone.')) return
@@ -117,11 +118,12 @@ function IncidentList({ reports, isAdmin, onDecided }: {
 
   return (
     <section>
-      <div className="section-heading"><h2>{isAdmin ? 'Review queue' : 'Reports you filed'}</h2></div>
+      <div className="section-heading incident-list-heading"><h2>{isAdmin ? 'Review queue' : 'Reports you filed'}</h2></div>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {reports.length === 0 ? <p className="empty-state">No incident reports to show.</p> : (
-        <ul className="incident-list">
-          {reports.map(report => (
+        <>
+          <ul className="incident-list" id="incident-report-list">
+          {reports.slice(0, expanded ? reports.length : 3).map(report => (
             <li className="panel incident-card" key={report.incident_id}>
               <div className="incident-card-heading">
                 <div>
@@ -152,7 +154,14 @@ function IncidentList({ reports, isAdmin, onDecided }: {
               )}
             </li>
           ))}
-        </ul>
+          </ul>
+          {!isAdmin && reports.length > 3 && (
+            <button className="history-toggle incident-history-toggle" type="button" aria-expanded={expanded} aria-controls="incident-report-list" onClick={() => setExpanded(value => !value)}>
+              {expanded ? 'Show less' : `Show all ${reports.length} reports`}
+              <svg className={expanded ? 'history-chevron expanded' : 'history-chevron'} aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 6 4 4 4-4" /></svg>
+            </button>
+          )}
+        </>
       )}
     </section>
   )
@@ -256,7 +265,6 @@ function IncidentReports() {
   return (
     <main className="content-page incident-page">
       <div className="page-intro">
-        <p className="eyebrow">Game-day documentation</p>
         <h1>Incident reports.</h1>
         <p>Record and review incidents connected to league games.</p>
       </div>

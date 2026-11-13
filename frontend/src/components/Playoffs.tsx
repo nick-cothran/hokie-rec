@@ -1,5 +1,5 @@
 import '../styles/Playoffs.css'
-import { useState, type FormEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, campusTime, formatGameTime as when, query, roundName, useApi, type Facility, type Game, type Standing } from '../api'
 import { useAuth } from '../auth'
@@ -34,8 +34,39 @@ function Side({ game, side, placeholder }: { game: Game; side: 'home' | 'away'; 
 }
 
 function Bracket({ games }: { games: Game[] }) {
+  const bracketRef = useRef<HTMLDivElement>(null)
+  const [connectors, setConnectors] = useState<{ gameId: number; path: string }[]>([])
   const rounds = [...new Set(games.map(g => g.playoff_round as number))].sort((a, b) => a - b)
   const last = rounds.at(-1) ?? 0
+  useLayoutEffect(() => {
+    const bracket = bracketRef.current
+    if (!bracket) return
+
+    function updateConnectors() {
+      if (!bracket) return
+      const bounds = bracket.getBoundingClientRect()
+      const cards = new Map(Array.from(bracket.querySelectorAll<HTMLElement>('[data-bracket-game]'))
+        .map(card => [Number(card.dataset.bracketGame), card.getBoundingClientRect()]))
+      setConnectors(games.flatMap(game => {
+        const from = cards.get(game.game_id)
+        const to = game.next_game_id === null ? undefined : cards.get(game.next_game_id)
+        if (!from || !to) return []
+        const startX = from.right - bounds.left
+        const startY = from.top + from.height / 2 - bounds.top
+        const endX = to.left - bounds.left
+        const endY = to.top + to.height / 2 - bounds.top
+        const middleX = (startX + endX) / 2
+        return [{ gameId: game.game_id, path: `M ${startX} ${startY} H ${middleX} V ${endY} H ${endX}` }]
+      }))
+    }
+
+    updateConnectors()
+    const observer = new ResizeObserver(updateConnectors)
+    observer.observe(bracket)
+    bracket.querySelectorAll<HTMLElement>('[data-bracket-game]').forEach(card => observer.observe(card))
+    window.addEventListener('resize', updateConnectors)
+    return () => { observer.disconnect(); window.removeEventListener('resize', updateConnectors) }
+  }, [games])
   const label = (g: Game) => {
     const inRound = games.filter(x => x.playoff_round === g.playoff_round)
     const name = roundName(last - (g.playoff_round as number) + 1)
@@ -56,13 +87,17 @@ function Bracket({ games }: { games: Game[] }) {
   return (
     <>
       {champion && <p className="notice notice-success" role="status">Champion: <strong>{champion}</strong></p>}
-      <div className="bracket" style={{ gridTemplateColumns: `repeat(${rounds.length}, minmax(220px, 1fr))` }}>
+      <div className="bracket-scroll">
+      <div className="bracket" ref={bracketRef} style={{ gridTemplateColumns: `repeat(${rounds.length}, minmax(220px, 1fr))`, minWidth: `${rounds.length * 220 + (rounds.length - 1) * 48}px` }}>
+        <svg className="bracket-connectors" aria-hidden="true">
+          {connectors.map(connector => <path key={connector.gameId} d={connector.path} />)}
+        </svg>
         {rounds.map(r => (
           <div className="bracket-round" key={r}>
             <h3>{roundName(last - r + 1)}</h3>
             <div className="bracket-games">
               {games.filter(g => g.playoff_round === r).map(g => (
-                <article className="bracket-game" key={g.game_id} aria-label={label(g)}>
+                <article className="bracket-game" key={g.game_id} data-bracket-game={g.game_id} aria-label={label(g)}>
                   <Side game={g} side="home" placeholder={placeholder(g, 0)} />
                   <Side game={g} side="away" placeholder={placeholder(g, 1)} />
                   <p className="bracket-meta">{when(g.start_time)} · {g.facility_name}</p>
@@ -71,6 +106,7 @@ function Bracket({ games }: { games: Game[] }) {
             </div>
           </div>
         ))}
+      </div>
       </div>
     </>
   )

@@ -1,8 +1,29 @@
-.result-mode { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin: 0; padding: 0; border: 0; }
-.result-mode legend { margin-bottom: 0.5rem; padding: 0; color: var(--ink-soft); font-size: 0.8rem; font-weight: 700; }
-.result-mode label { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.92rem; cursor: pointer; }
-.score-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.score-entry-actions { justify-content: flex-start; margin-bottom: 1rem; }
+.score-entry-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+.score-entry-layout .page-intro { margin-bottom: 0; }
+.score-entry-layout > .panel { min-width: 0; }
+.score-form-card { padding: 1.75rem; }
+.score-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.score-result-heading .eyebrow { margin-bottom: 0.3rem; }
+.score-result-heading h2 { margin: 0; font-size: 1.2rem; }
+.score-result-card { min-height: clamp(20rem, 42vh, 30rem); display: flex; flex-direction: column; justify-content: center; padding: 2rem; }
+.current-result { margin: 0; color: var(--ink); font-size: clamp(1.2rem, 2.5vw, 1.65rem); font-weight: 750; line-height: 1.3; overflow-wrap: anywhere; }
+.score-entry-page .form-stack { max-width: none; gap: 1.25rem; }
+.score-submission-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 1rem; margin-top: 0.25rem; }
+.result-mode { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; padding: 0; border: 0; }
+.result-mode legend { width: 100%; margin-bottom: 0.15rem; padding: 0; color: var(--ink-soft); font-size: 0.8rem; font-weight: 700; }
+.result-mode label { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 40px; padding: 0.45rem 0.8rem; border: 1px solid var(--line); border-radius: 4px; background: #f7f9fb; color: var(--ink-soft); font-size: 0.9rem; cursor: pointer; }
+.result-mode label:has(input:checked) { border-color: var(--orange); background: #fff5ec; color: var(--ink); }
+.result-mode input { accent-color: var(--orange-dark); }
+.score-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; min-width: 0; }
 .score-inputs .field input { min-width: 0; font-size: 1.25rem; font-weight: 700; }
-.current-result { margin: 0; color: var(--ink); font-size: 1.35rem; font-weight: 750; }
+.score-history { min-width: 0; }
+.score-history .section-heading { margin-bottom: 0.8rem; }
 
-@media (max-width: 500px) { .score-inputs { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .score-submission-row,
+  .score-inputs { grid-template-columns: 1fr; }
+  .score-entry-page .panel { padding: 1.15rem; }
+  .score-entry-page .score-form-card { padding: 1.35rem; }
+  .score-entry-page .score-result-card { min-height: 17rem; }
+}

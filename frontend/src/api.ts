@@ -144,9 +144,10 @@ export function campusTime(local: string) {
   return new Date(instant)
 }
 
-// "Forfeit: <team that forfeited>", for a game or score report naming its forfeiting team
+// Identify which team forfeited in a game or score report.
 export function forfeitLabel(g: { home_team_id: number | null; home_team_name: string | null; away_team_name: string | null }, forfeitTeamId: number) {
-  return `Forfeit: ${forfeitTeamId === g.home_team_id ? g.home_team_name : g.away_team_name}`
+  const team = forfeitTeamId === g.home_team_id ? g.home_team_name : g.away_team_name
+  return `${team ?? 'Team'} forfeited`
 }
 
 type ValidationIssue = { loc?: (string | number)[]; msg: string }

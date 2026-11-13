@@ -15,7 +15,7 @@
 
    ```powershell
    python migrate.py
-   python seed_demo_accounts.py --development
+   python -m seeds.seed_demo_accounts --development
    ```
 
    `migrate.py` brings an existing database up to date, including membership history and scheduling rules; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. Existing roster rows provide at most their most recent membership period; older overwritten periods cannot be recovered. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. The administrators are `simvt0133`–`simvt0135`; sign in as one and open **Admin** to create officials and other administrators. Anyone can change their password from **Account**. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
@@ -24,7 +24,7 @@
 
    **Schedule a game:** Sign in as an administrator and open **Schedule → Schedule a game**. Choose two active teams in the same league, a facility, and future start/end times in Blacksburg (Eastern) time. Regular-season games must fit within the league's season dates. The application checks for overlapping team and facility bookings and warns about undersized rosters. The Schedule page also offers round-robin generation, game management, and official assignments. Once a playoff bracket exists, remove it before adding regular-season games. Individual playoff games cannot be rescheduled; manage the bracket from its league page.
 
-   **Upcoming demo game:** To add an upcoming game for player `simvt0001` and official `simvt0121` without replacing existing games or results, run `python seed_score_demo.py --development --upcoming` from `/backend`. Rerunning it reuses an existing upcoming demo assignment when available.
+   **Upcoming demo game:** To add an upcoming game for player `simvt0001` and official `simvt0121` without replacing existing games or results, run `python -m seeds.seed_score_demo --development --upcoming` from `/backend`. Rerunning it reuses an existing upcoming demo assignment when available.
 
    **Results and playoffs:** A replacement official can be assigned to a completed game for a correction. If a regular-season correction would change an existing bracket's seeds, remove the unplayed bracket first, then make the correction and regenerate it. A bracket with playoff results cannot be removed. If advancing a winner would overlap another game for that team, an administrator must reschedule the conflicting game before the official can submit the result.
 

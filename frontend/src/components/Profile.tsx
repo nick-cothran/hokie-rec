@@ -10,14 +10,23 @@ type MembershipHistory = { period_id: number; team_id: number | null; team_name:
 
 function TeamHistory() {
   const history = useApi<MembershipHistory[]>('/api/me/membership-history')
+  const [expanded, setExpanded] = useState(false)
+  const entries = history.data ?? []
+  const visibleEntries = expanded ? entries : entries.slice(0, 3)
   return <section className="panel"><h2>Team history</h2>
     <p>Your recorded team memberships, including teams you have left.</p>
     {history.loading && <p role="status">Loading team history…</p>}
     {history.error && <p className="notice notice-error" role="alert">{history.error}</p>}
     {!history.loading && !history.error && history.data?.length === 0 && <p>No team memberships yet.</p>}
-    {!history.loading && !history.error && !!history.data?.length && <ul className="invite-list">{history.data.map(entry => <li key={entry.period_id}>
+    {!history.loading && !history.error && !!entries.length && <ul className="invite-list" id="team-history-list">{visibleEntries.map(entry => <li key={entry.period_id}>
       <div>{entry.team_id === null ? <strong>{entry.team_name}</strong> : <Link className="text-link" to={`/teams/${entry.team_id}`}>{entry.team_name}</Link>}<span className="invite-meta">{entry.league_name} · {entry.status === 'team_deleted' ? 'Team deleted' : entry.status} · Joined {formatCampusDate(entry.joined_at)}{entry.left_at ? ` · Left ${formatCampusDate(entry.left_at)}` : ''}</span></div>
     </li>)}</ul>}
+    {!history.loading && !history.error && entries.length > 3 && (
+      <button className="history-toggle" type="button" aria-expanded={expanded} aria-controls="team-history-list" onClick={() => setExpanded(value => !value)}>
+        {expanded ? 'Show less' : `Show all ${entries.length} memberships`}
+        <svg className={expanded ? 'history-chevron expanded' : 'history-chevron'} aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m4 6 4 4 4-4" /></svg>
+      </button>
+    )}
   </section>
 }
 
@@ -146,7 +155,6 @@ export default function Profile() {
   return (
     <main className="content-page profile-page">
       <div className="page-intro">
-        <p className="eyebrow">Your account</p>
         <h1>Your profile.</h1>
         <p>Keep your name and contact information up to date.</p>
       </div>
@@ -166,18 +174,19 @@ export default function Profile() {
               <div><dt>Role</dt><dd>{roleLabels[profile.role]}</dd></div>
               <div><dt>Joined</dt><dd>{formatCampusDate(profile.created_at)}</dd></div>
             </dl>
-            <p className="profile-account-help">Your PID and account role cannot be changed here.</p>
-            <div className="form-row">
-              <button className="button button-outline button-small" type="button" onClick={logout} disabled={signingOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
-              {user.role === 'admin' && <Link className="text-link" to="/admin/users">Manage accounts →</Link>}
-            </div>
-            {signOutError && <p className="notice notice-error" role="alert">{signOutError}</p>}
+            {user.role === 'admin' && <Link className="text-link" to="/admin/users">Manage accounts →</Link>}
           </section>
           <ProfileForm key={profile.user_id} profile={profile} />
           {user.role === 'player' && <TeamHistory key={user.user_id} />}
           <section className="panel profile-password"><ChangePassword /></section>
         </div>
       )}
+      {(profile || response.error) && <section className="panel profile-sign-out" aria-labelledby="sign-out-heading">
+        <h2 id="sign-out-heading">Sign out</h2>
+        <p>End your current session on this device.</p>
+        {signOutError && <p className="notice notice-error" role="alert">{signOutError}</p>}
+        <button className="button button-danger" type="button" onClick={logout} disabled={signingOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
+      </section>}
     </main>
   )
 }

@@ -9,7 +9,7 @@ Start the database, backend, and frontend using the setup instructions in the pr
 From the `backend` folder, with the virtual environment active, prepare a fresh game for score entry and an upcoming assignment:
 
 ```powershell
-python seed_score_demo.py --development --new-game --upcoming
+python -m seeds.seed_score_demo --development --new-game --upcoming
 ```
 
 The command prints the score-entry game's address. Keep that terminal visible so you can find it if needed. It adds a new unscored game and preserves existing results.

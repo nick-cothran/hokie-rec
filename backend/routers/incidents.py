@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
-from auth import AuthenticatedUser
+from routers.auth import AuthenticatedUser
 from database import db
 
 router = APIRouter(tags=["Incident reports"])

@@ -16,7 +16,7 @@ class FinalFeatureMigrationTest(unittest.TestCase):
             conn.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(name)))
         try:
             conninfo = make_conninfo(database.DATABASE_URL, options=f'-c search_path={name}')
-            root = Path(__file__).resolve().parents[1] / 'db'
+            root = Path(__file__).resolve().parents[2] / 'db'
             with psycopg.connect(conninfo) as conn:
                 for script in ('schema', 'auth', 'roster', 'phase3', 'seed'):
                     conn.execute((root / f'{script}.sql').read_text())

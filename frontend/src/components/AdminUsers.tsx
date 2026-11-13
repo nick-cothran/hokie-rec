@@ -90,7 +90,6 @@ function AdminUsers() {
     return (
       <main className="content-page">
         <section className="empty-state">
-          <p className="eyebrow">Administration</p>
           <h1>Administrators only</h1>
           <p>{user ? `You're signed in as ${fullName(user)}, who is not an administrator.` : 'Sign in with an administrator account to manage accounts.'}</p>
           {!user && <Link className="button button-primary" to="/sign-in?next=%2Fadmin%2Fusers">Sign in</Link>}
@@ -106,7 +105,6 @@ function AdminUsers() {
   return (
     <main className="content-page admin-users-page">
       <div className="page-intro">
-        <p className="eyebrow">Administration</p>
         <h1>Accounts.</h1>
         <p>Create accounts for officials and administrators, and look up anyone who uses Hokie Rec.</p>
       </div>

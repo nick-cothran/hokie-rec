@@ -18,9 +18,9 @@ TEST_SCHEMA = "hokie_rec_test_" + uuid.uuid4().hex
 database.DATABASE_URL = make_conninfo(BASE_URL, options=f"-c search_path={TEST_SCHEMA}")
 DATABASE_URL = database.DATABASE_URL
 
-import main
+from routers import teams
 from main import app
-from auth import COOKIE_NAME, password_hasher, token_hash
+from routers.auth import COOKIE_NAME, password_hasher, token_hash
 
 PASSWORD = "Test-only-password-2026"
 
@@ -29,7 +29,7 @@ def setUpModule():
     with psycopg.connect(BASE_URL) as conn:
         conn.execute(pgsql.SQL("CREATE SCHEMA {}").format(pgsql.Identifier(TEST_SCHEMA)))
     try:
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         with psycopg.connect(DATABASE_URL) as conn:
             for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
@@ -584,7 +584,7 @@ class RosterTest(RosterCase):
         # Pause accept right after its invite check, then withdraw; the outcome must be consistent either way
         self.invite_pid(self.other)
         checked, withdrawn = threading.Event(), threading.Event()
-        real = main.ineligible_reason
+        real = teams.ineligible_reason
 
         def paused(*args):
             checked.set()
@@ -592,7 +592,7 @@ class RosterTest(RosterCase):
             return real(*args)
 
         player, captain = client_for(self.other), client_for(self.captain)
-        with patch.object(main, "ineligible_reason", paused), ThreadPoolExecutor(2) as pool:
+        with patch.object(teams, "ineligible_reason", paused), ThreadPoolExecutor(2) as pool:
             accept = pool.submit(player.post, f"/api/teams/{self.team_id}/invite/accept")
             checked.wait(5)
             withdraw = pool.submit(lambda: (captain.delete(f"/api/teams/{self.team_id}/invites/{self.other}"), withdrawn.set()))
@@ -1175,7 +1175,7 @@ class AuthTest(unittest.TestCase):
         self.assertEqual(sql("SELECT COUNT(*) FROM Users")[0][0], 135)
 
     def test_demo_setup_preserves_existing_credentials_and_reset_revokes(self):
-        from seed_demo_accounts import seed_demo_accounts
+        from seeds.seed_demo_accounts import seed_demo_accounts
         before = sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0]
         seed_demo_accounts("Replacement-demo-pass")
         self.assertEqual(sql("SELECT password_hash FROM UserCredentials WHERE user_id = %s", (self.user_id,))[0][0], before)
@@ -1290,13 +1290,13 @@ class SignUpTest(unittest.TestCase):
         self.assertEqual(sql("SELECT COUNT(*) FROM Users u JOIN UserCredentials c USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0], 1)
 
     def test_signup_is_atomic_if_session_creation_fails(self):
-        with patch("auth.issue_session", side_effect=RuntimeError("Simulated session failure")):
+        with patch("routers.auth.issue_session", side_effect=RuntimeError("Simulated session failure")):
             with self.assertRaises(RuntimeError):
                 self.register()
         self.assertEqual(sql("SELECT COUNT(*) FROM Users WHERE vt_pid = %s", (self.pid,))[0][0], 0)
 
     def test_demo_reset_does_not_change_registered_users(self):
-        from seed_demo_accounts import DEMO_PASSWORD, seed_demo_accounts
+        from seeds.seed_demo_accounts import DEMO_PASSWORD, seed_demo_accounts
         self.assertEqual(self.register().status_code, 201)
         original_hash = sql("SELECT c.password_hash FROM UserCredentials c JOIN Users u USING (user_id) WHERE u.vt_pid = %s", (self.pid,))[0][0]
         self.assertEqual(seed_demo_accounts(reset=True), 135)

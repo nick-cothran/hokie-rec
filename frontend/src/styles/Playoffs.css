@@ -1,10 +1,13 @@
 .playoffs { display: grid; gap: 1rem; }
 .playoffs-intro { margin: -0.5rem 0 0; color: var(--ink-soft); }
-.bracket { display: grid; gap: 1.5rem; overflow-x: auto; padding: 0.25rem 0 0.75rem; }
+.bracket-scroll { overflow-x: auto; padding-bottom: 0.75rem; }
+.bracket { position: relative; display: grid; gap: 3rem; padding: 0.25rem 0; }
+.bracket-connectors { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.bracket-connectors path { fill: none; stroke: #9aaabd; stroke-width: 1.5; }
 .bracket-round { display: grid; grid-template-rows: auto 1fr; gap: 0.85rem; min-width: 0; }
 .bracket-games { display: grid; align-content: space-around; gap: 1rem; }
 .bracket-round h3 { margin: 0; padding-bottom: 0.55rem; border-bottom: 2px solid var(--line); color: var(--ink-soft); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; }
-.bracket-game { overflow: hidden; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); box-shadow: 0 2px 8px rgba(23, 43, 77, 0.05); }
+.bracket-game { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); box-shadow: 0 2px 8px rgba(23, 43, 77, 0.05); }
 .bracket-team { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-height: 2.8rem; padding: 0.65rem 0.9rem; color: var(--ink); font-size: 0.92rem; }
 .bracket-team a { min-width: 0; color: var(--ink); font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
 .bracket-team a:hover { color: var(--orange-dark); text-decoration: underline; }

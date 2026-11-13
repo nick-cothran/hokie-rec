@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from psycopg.errors import ForeignKeyViolation, UniqueViolation
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from admin import Admin
+from routers.admin import Admin
 from database import db
 from standings import league_standings
 

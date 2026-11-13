@@ -10,7 +10,7 @@ from psycopg import sql as pgsql
 from psycopg.conninfo import make_conninfo
 
 import database
-from auth import password_hasher
+from routers.auth import password_hasher
 from main import app
 
 PASSWORD = "Profile test password 2026"
@@ -29,7 +29,7 @@ def setUpModule():
     try:
         with psycopg.connect(TEST_URL) as conn:
             for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
-                conn.execute((Path(__file__).resolve().parents[1] / f"db/{name}.sql").read_text())
+                conn.execute((Path(__file__).resolve().parents[2] / f"db/{name}.sql").read_text())
         PASSWORD_HASH = password_hasher.hash(PASSWORD)
         database.DATABASE_URL = TEST_URL
     except Exception:

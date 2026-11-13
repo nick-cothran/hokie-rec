@@ -11,7 +11,7 @@ from psycopg.conninfo import make_conninfo
 from fastapi.testclient import TestClient
 
 import database
-from auth import password_hasher
+from routers.auth import password_hasher
 from main import app
 
 PASSWORD = "Scoring test password"
@@ -34,7 +34,7 @@ def setUpModule():
         conn.execute(pgsql.SQL("CREATE SCHEMA {}").format(pgsql.Identifier(TEST_SCHEMA)))
     database.DATABASE_URL = make_conninfo(BASE_URL, options=f"-c search_path={TEST_SCHEMA}")
     try:
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         with database.db() as conn:
             for name in ("schema", "auth", "roster", "phase3", "final_features", "seed"):
                 conn.execute((root / f"db/{name}.sql").read_text())
@@ -323,7 +323,7 @@ class ScoreReportingTest(unittest.TestCase):
 
 class DemoScoreSeedTest(unittest.TestCase):
     def test_fixture_is_idempotent_preserves_scores_and_can_add_fresh_game(self):
-        from seed_score_demo import seed_score_demo
+        from seeds.seed_score_demo import seed_score_demo
         first = seed_score_demo()
         self.assertEqual(seed_score_demo(), first)
         self.assertEqual(sql('SELECT COUNT(*) AS n FROM ScoreReport WHERE game_id = %s', (first,))[0]['n'], 0)
@@ -347,7 +347,7 @@ class DemoScoreSeedTest(unittest.TestCase):
         self.assertEqual(sql('SELECT COUNT(*) AS n FROM Users')[0]['n'], 135)
 
     def test_upcoming_demo_is_repeatable_and_preserves_existing_result(self):
-        from seed_score_demo import seed_score_demo
+        from seeds.seed_score_demo import seed_score_demo
         first = seed_score_demo()
         with TestClient(app, headers={'X-Requested-With': 'HokieRec'}) as client:
             self.assertEqual(client.post('/api/auth/login', json={'vt_pid': 'simvt0121', 'password': PASSWORD}).status_code, 200)

@@ -5,6 +5,9 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { api, campusTime, forfeitLabel, formatDate, formatGameTime as when, gameRound as round, query, useApi, type Assignment, type Game, type League, type MyGames, type Official } from '../api'
 import { useAuth } from '../auth'
 import GenerateSchedule from './GenerateSchedule'
+import Pagination from './Pagination'
+import { paginate } from '../pagination'
+import ViewTabs from './ViewTabs'
 
 function result(g: Game) {
   if (g.forfeit_team_id !== null) return forfeitLabel(g, g.forfeit_team_id)
@@ -18,7 +21,7 @@ function TeamLink({ id, name }: { id: number | null; name: string | null }) {
 }
 
 function PersonalGameList({ games }: { games: Game[] }) {
-  return <ul className="invite-list personal-games-list">
+  return <ul className="personal-games-list">
     {games.map(game => <li key={game.game_id}>
       <div>
         <strong><TeamLink id={game.home_team_id} name={game.home_team_name} /> vs <TeamLink id={game.away_team_id} name={game.away_team_name} /></strong>
@@ -31,16 +34,19 @@ function PersonalGameList({ games }: { games: Game[] }) {
 
 function YourGames() {
   const games = useApi<MyGames>('/api/me/games')
-  return <section className="panel personal-games" aria-labelledby="your-games-heading">
+  return <section className="personal-games" aria-labelledby="your-games-heading">
     <h2 id="your-games-heading">Your games</h2>
-    <p>Games for teams where you are currently an active player.</p>
     {games.loading && <p role="status">Loading your games…</p>}
     {games.error && <p className="notice notice-error" role="alert">{games.error}</p>}
     {!games.loading && !games.error && games.data && <>
-      <h3>Upcoming and in progress</h3>
-      {games.data.upcoming.length ? <PersonalGameList games={games.data.upcoming} /> : <p>No upcoming games for your teams.</p>}
-      <h3>Recent results</h3>
-      {games.data.recent.length ? <PersonalGameList games={games.data.recent} /> : <p>No recent results for your teams.</p>}
+      <section className="panel personal-games-group" aria-labelledby="upcoming-games-heading">
+        <div className="personal-games-group-heading"><h3 id="upcoming-games-heading">Upcoming and in progress</h3><span>{games.data.upcoming.length}</span></div>
+        {games.data.upcoming.length ? <PersonalGameList games={games.data.upcoming} /> : <p className="personal-games-empty">No upcoming games for your teams.</p>}
+      </section>
+      <section className="panel personal-games-group" aria-labelledby="recent-games-heading">
+        <div className="personal-games-group-heading"><h3 id="recent-games-heading">Recent results</h3><span>{games.data.recent.length}</span></div>
+        {games.data.recent.length ? <PersonalGameList games={games.data.recent} /> : <p className="personal-games-empty">No recent results for your teams.</p>}
+      </section>
     </>}
   </section>
 }
@@ -50,9 +56,10 @@ function Assignments() {
   const assignments = useApi<Assignment[]>('/api/me/assignments')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const needsAction = assignments.data?.filter(a => a.can_respond || (a.status === 'scheduled' && a.assignment_status !== 'declined' && a.has_ended && a.home_team_id !== null && a.away_team_id !== null)) ?? []
-  const upcoming = assignments.data?.filter(a => !needsAction.includes(a) && a.status === 'scheduled' && a.assignment_status !== 'declined' && !a.has_ended) ?? []
-  const other = assignments.data?.filter(a => !needsAction.includes(a) && !upcoming.includes(a)).slice().sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()) ?? []
+  const needsResponse = assignments.data?.filter(a => a.can_respond) ?? []
+  const needsScore = assignments.data?.filter(a => !a.can_respond && a.status === 'scheduled' && a.assignment_status !== 'declined' && a.has_ended && a.home_team_id !== null && a.away_team_id !== null) ?? []
+  const upcoming = assignments.data?.filter(a => !needsResponse.includes(a) && !needsScore.includes(a) && a.status === 'scheduled' && a.assignment_status !== 'declined' && !a.has_ended) ?? []
+  const other = assignments.data?.filter(a => !needsResponse.includes(a) && !needsScore.includes(a) && !upcoming.includes(a)).slice().sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime()) ?? []
 
   async function answer(a: Assignment, action: 'accept' | 'decline') {
     setBusy(true)
@@ -76,7 +83,7 @@ function Assignments() {
                 {when(a.start_time)} · {a.facility_name} · {a.league_name} · {a.position} · <span className={`pill pill-${a.assignment_status}`}>{a.assignment_status}</span>{a.status === 'cancelled' && <> · Game cancelled</>}
               </span>
             </div>
-            {a.assignment_status !== 'declined' && a.status !== 'cancelled' && a.home_team_id !== null && a.away_team_id !== null && a.has_ended && (
+            {!a.can_respond && a.assignment_status !== 'declined' && a.status !== 'cancelled' && a.home_team_id !== null && a.away_team_id !== null && a.has_ended && (
               <Link className={`button button-small ${a.status === 'completed' ? 'button-outline' : 'button-primary'}`} to={`/games/${a.game_id}/score`}>
                 {a.status === 'completed' ? 'View result' : 'Enter result'}
               </Link>
@@ -93,16 +100,24 @@ function Assignments() {
   }
 
   return (
-    <section className="panel invitations official-assignments" aria-labelledby="assignments-heading">
+    <section className="invitations official-assignments" aria-labelledby="assignments-heading">
       <h2 id="assignments-heading">Your assignments</h2>
       {(error || assignments.error) && <p className="notice notice-error" role="alert">{error || assignments.error}</p>}
       {assignments.loading && !assignments.data && <p role="status">Loading assignments…</p>}
       {assignments.data?.length === 0 && <p>No assignments yet.</p>}
       {!!assignments.data?.length && <>
-        <h3>Needs action</h3>
-        {needsAction.length ? list(needsAction) : <p>No assignments need your attention.</p>}
-        <h3>Upcoming and in progress</h3>
-        {upcoming.length ? list(upcoming) : <p>No other upcoming or in-progress assignments.</p>}
+        <section className="assignment-group panel" aria-labelledby="assignment-response-heading">
+          <h3 id="assignment-response-heading">Respond to assignments <span>{needsResponse.length}</span></h3>
+          {needsResponse.length ? list(needsResponse) : <p>No assignments need a response.</p>}
+        </section>
+        <section className="assignment-group panel" aria-labelledby="assignment-score-heading">
+          <h3 id="assignment-score-heading">Score reports needed <span>{needsScore.length}</span></h3>
+          {needsScore.length ? list(needsScore) : <p>No game scores to enter.</p>}
+        </section>
+        <section className="assignment-group panel" aria-labelledby="assignment-upcoming-heading">
+          <h3 id="assignment-upcoming-heading">Upcoming and in progress <span>{upcoming.length}</span></h3>
+          {upcoming.length ? list(upcoming) : <p>No other upcoming or in-progress assignments.</p>}
+        </section>
         {!!other.length && <details className="assignment-history"><summary>Past, declined and cancelled ({other.length})</summary>{list(other)}</details>}
       </>}
     </section>
@@ -274,19 +289,33 @@ function Schedule() {
   const leagues = useApi<League[]>('/api/leagues')
   const leagueId = params.get('league') ?? String(leagues.data?.find(l => l.team_count > 0)?.league_id ?? '')
   const teamId = params.get('team') ?? ''
+  const hasPersonalSchedule = user?.role === 'player' || user?.role === 'official'
+  const selectedView = params.get('view')
+  const showPersonal = hasPersonalSchedule && (selectedView === 'mine' || (selectedView !== 'all' && !params.has('league') && !params.has('team') && !params.has('page')))
   const selectedLeague = leagues.data?.find(item => String(item.league_id) === leagueId)
   const games = useApi<Game[]>(leagueId ? `/api/games${query({ league_id: leagueId })}` : null)
   const visibleGames = teamId ? games.data?.filter(game => String(game.home_team_id) === teamId || String(game.away_team_id) === teamId) : games.data
+  const gamePage = paginate(visibleGames ?? [], params.get('page'))
   const generatorReason = games.data?.some(game => game.playoff_round !== null)
     ? 'A playoff bracket already exists. Remove the unplayed bracket before generating regular-season games.'
     : games.data?.some(game => game.playoff_round === null && game.status !== 'cancelled')
       ? 'This league already has regular-season games. Schedule additional games individually.' : undefined
   function refreshGames() { games.reload(); setCoverageRevision(value => value + 1) }
+  function setPage(page: number) {
+    const next = new URLSearchParams(params)
+    if (page === 1) next.delete('page')
+    else next.set('page', String(page))
+    setParams(next)
+  }
+  function setView(view: 'mine' | 'all') {
+    const next = new URLSearchParams(params)
+    next.set('view', view)
+    setParams(next)
+  }
 
   return (
     <main className="content-page schedule-page">
       <div className="page-intro">
-        <p className="eyebrow">Game day</p>
         <div className="intro-row">
           <div><h1>Schedules & scores.</h1><p>Know where to be and who you’re playing.</p></div>
         </div>
@@ -295,11 +324,13 @@ function Schedule() {
       {location.state?.notice && <p className="notice notice-success" role="status">{location.state.notice}</p>}
       {user?.role === 'admin' && <p className="form-row"><Link className="button button-primary" to="/admin/games/new">Schedule a game</Link>{leagueId && <a className="text-link" href="#manage-schedule-heading">Manage league schedule ↓</a>}</p>}
 
-      {user?.role === 'official' && <Assignments />}
-      {user?.role === 'player' && <YourGames key={user.user_id} />}
+      {hasPersonalSchedule && <ViewTabs label="Schedule views" personalLabel={user?.role === 'official' ? 'Your assignments' : 'Your games'} allLabel="League schedule" value={showPersonal ? 'mine' : 'all'} onChange={setView} />}
+      {showPersonal && user?.role === 'official' && <Assignments />}
+      {showPersonal && user?.role === 'player' && <YourGames key={user.user_id} />}
+      {!showPersonal && <>
       <form className="filters" onSubmit={e => e.preventDefault()}>
         <label className="field">League
-          <select value={leagueId} onChange={e => setParams({ league: e.target.value }, { replace: true })}>
+          <select value={leagueId} onChange={e => setParams({ league: e.target.value, ...(hasPersonalSchedule ? { view: 'all' } : {}) }, { replace: true })}>
             {leagues.data?.map(l => <option key={l.league_id} value={l.league_id}>{l.league_name}</option>)}
           </select>
         </label>
@@ -317,25 +348,29 @@ function Schedule() {
           </section>
         )}
         {!!visibleGames?.length && (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr><th>When</th><th>Where</th><th>Home</th><th>Away</th><th>Round</th><th>Result</th></tr>
-              </thead>
-              <tbody>
-                {visibleGames.map(g => (
-                  <tr key={g.game_id}>
-                    <td>{when(g.start_time)}</td>
-                    <td>{g.facility_name}</td>
-                    <td><TeamLink id={g.home_team_id} name={g.home_team_name} /></td>
-                    <td><TeamLink id={g.away_team_id} name={g.away_team_name} /></td>
-                    <td>{round(g)}</td>
-                    <td>{user?.role === 'admin' && g.status === 'completed' ? <Link to={`/games/${g.game_id}/score`}>{result(g)}</Link> : result(g)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <p className="result-count">Showing {gamePage.start + 1}–{gamePage.end} of {visibleGames.length} game{visibleGames.length === 1 ? '' : 's'}</p>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr><th>When</th><th>Where</th><th>Home</th><th>Away</th><th>Round</th><th>Result</th></tr>
+                </thead>
+                <tbody>
+                  {gamePage.items.map(g => (
+                    <tr key={g.game_id}>
+                      <td>{when(g.start_time)}</td>
+                      <td>{g.facility_name}</td>
+                      <td><TeamLink id={g.home_team_id} name={g.home_team_name} /></td>
+                      <td><TeamLink id={g.away_team_id} name={g.away_team_name} /></td>
+                      <td>{round(g)}</td>
+                      <td>{user?.role === 'admin' && g.status === 'completed' ? <Link to={`/games/${g.game_id}/score`}>{result(g)}</Link> : result(g)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={gamePage.page} pageCount={gamePage.pageCount} onPageChange={setPage} />
+          </>
         )}
       </section>
       {user?.role === 'admin' && leagueId && <section className="admin-schedule-tools" aria-labelledby="manage-schedule-heading">
@@ -350,6 +385,7 @@ function Schedule() {
           {games.data && <ManageGame key={leagueId} games={games.data} onChanged={refreshGames} />}
         </details>
       </section>}
+      </>}
     </main>
   )
 }
