@@ -363,6 +363,7 @@ function Schedule() {
         </label>
       </form>
       {user?.role === 'admin' && selectedLeague && <p>Regular-season dates: {formatDate(selectedLeague.start_date)} – {formatDate(selectedLeague.end_date)}.</p>}
+      {isAdmin && adminTab === 'manage' && (leagues.error || games.error) && <p className="notice notice-error" role="alert">{leagues.error || games.error}</p>}
       {(!isAdmin || adminTab === 'league') && <section>
         <h2>League schedule</h2>
         {teamId && <p>Showing games for the selected team. <Link className="text-link" to={`/schedule?league=${leagueId}`}>Show all league games</Link></p>}
@@ -400,10 +401,10 @@ function Schedule() {
           </>
         )}
       </section>}
-      {user?.role === 'admin' && adminTab === 'manage' && leagueId && <section className="admin-schedule-tools" aria-labelledby="manage-schedule-heading">
+      {user?.role === 'admin' && adminTab === 'manage' && leagueId && !leagues.error && !games.error && <section className="admin-schedule-tools" aria-labelledby="manage-schedule-heading">
         <h2 id="manage-schedule-heading">Manage this league</h2>
         <details className="schedule-tool"><summary>Generate a regular-season schedule</summary>
-          {games.error ? <p className="notice notice-error">{games.error}</p> : games.data ? <GenerateSchedule key={leagueId} leagueId={leagueId} minimum={selectedLeague?.min_roster_size ?? 0} unavailableReason={generatorReason} onCreated={refreshGames} /> : <p>Loading league schedule…</p>}
+          {games.data ? <GenerateSchedule key={leagueId} leagueId={leagueId} minimum={selectedLeague?.min_roster_size ?? 0} unavailableReason={generatorReason} onCreated={refreshGames} /> : <p>Loading league schedule…</p>}
         </details>
         <details className="schedule-tool"><summary>Assign officials</summary>
           {games.data && <AdminAssignmentForm key={`${leagueId}-${coverageRevision}`} games={games.data} />}
