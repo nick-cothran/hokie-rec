@@ -5,7 +5,7 @@ type Auth = {
   user: User | null
   loading: boolean
   error: string
-  signIn: (pid: string, password: string) => Promise<void>
+  signIn: (pid: string, password: string) => Promise<User>
   signUp: (details: SignUpDetails) => Promise<void>
   signOut: () => Promise<void>
   updateProfile: (details: ProfileDetails) => Promise<Profile>

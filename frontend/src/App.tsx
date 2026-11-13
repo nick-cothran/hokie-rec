@@ -12,7 +12,7 @@ import ScoreEntry from './components/ScoreEntry'
 import Reports from './components/Reports'
 import IncidentReports from './components/IncidentReports'
 import AdminUsers from './components/AdminUsers'
-import Resources from './components/Resources'
+import AdminSetup from './components/AdminSetup'
 import SignIn from './components/SignIn'
 import SignUp from './components/SignUp'
 import Profile from './components/Profile'
@@ -39,7 +39,7 @@ function App() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/incidents" element={<IncidentReports />} />
             <Route path="/admin/users" element={<AdminUsers />} />
-            <Route path="/resources" element={<Resources />} />
+            <Route path="/admin/setup" element={<AdminSetup />} />
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/sign-up" element={<SignUp />} />
             <Route path="/profile" element={<Profile />} />

@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, campusTime, query, useApi, type Facility, type League, type TeamSummary } from '../api'
+import { api, campusTime, formatDate, query, useApi, type Facility, type League, type TeamSummary } from '../api'
 import { useAuth } from '../auth'
 
-export default function CreateGame() {
+export default function CreateGame({ embedded = false }: { embedded?: boolean } = {}) {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
@@ -18,6 +18,9 @@ export default function CreateGame() {
   const [end, setEnd] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const minimum = leagues.data?.find(item => String(item.league_id) === league)?.min_roster_size ?? 0
+  const selectedLeague = leagues.data?.find(item => String(item.league_id) === league)
+  const undersized = teams.data?.filter(team => [home, away].includes(String(team.team_id)) && team.member_count < minimum) ?? []
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -42,15 +45,17 @@ export default function CreateGame() {
   if (loading) return <main className="content-page"><p>Checking your session…</p></main>
   if (!isAdmin) return <main className="content-page"><section className="empty-state"><h1>Administrators only</h1><p>Sign in as an administrator to schedule a game.</p>{!user && <Link className="button button-primary" to="/sign-in?next=%2Fadmin%2Fgames%2Fnew">Sign in</Link>}</section></main>
 
-  return <main className="content-page detail-page">
-    <Link className="back-link" to="/schedule">← Schedule</Link>
-    <div className="page-intro"><p className="eyebrow">Administration</p><h1>Schedule a game.</h1><p>Choose the teams, facility, and time for a regular-season game.</p></div>
+  const content = <>
+    {!embedded && <Link className="back-link" to="/schedule">← Schedule</Link>}
+    <div className={embedded ? 'page-intro admin-create-game-intro' : 'page-intro'}>{embedded ? <h2>Schedule a game</h2> : <h1>Schedule a game.</h1>}{!embedded && <p>Choose the teams, facility, and time for a regular-season game.</p>}</div>
     <section className="panel">
       {(leagues.error || facilities.error || teams.error) && <p className="notice notice-error" role="alert">{leagues.error || facilities.error || teams.error}</p>}
       <form className="form-stack" onSubmit={submit}>
         <label className="field">League<select value={league} required disabled={busy || leagues.loading} onChange={e => { setLeague(e.target.value); setHome(''); setAway('') }}><option value="">Choose a league</option>{leagues.data?.map(l => <option key={l.league_id} value={l.league_id}>{l.league_name}</option>)}</select></label>
+        {selectedLeague && <p>Regular-season dates: {formatDate(selectedLeague.start_date)} – {formatDate(selectedLeague.end_date)}.</p>}
         <label className="field">Home team<select value={home} required disabled={busy || !league || teams.loading} onChange={e => setHome(e.target.value)}><option value="">Choose a team</option>{teams.data?.filter(t => t.status === 'active' && String(t.team_id) !== away).map(t => <option key={t.team_id} value={t.team_id}>{t.team_name}</option>)}</select></label>
         <label className="field">Away team<select value={away} required disabled={busy || !league || teams.loading} onChange={e => setAway(e.target.value)}><option value="">Choose a team</option>{teams.data?.filter(t => t.status === 'active' && String(t.team_id) !== home).map(t => <option key={t.team_id} value={t.team_id}>{t.team_name}</option>)}</select></label>
+        {undersized.length > 0 && <p className="notice notice-info">Below the minimum of {minimum} active players: {undersized.map(team => `${team.team_name} (${team.member_count})`).join(', ')}. Confirm their rosters before game day.</p>}
         {league && teams.data && teams.data.filter(t => t.status === 'active').length < 2 && <p className="notice notice-info">This league needs at least two active teams to schedule a game.</p>}
         <label className="field">Facility<select value={facility} required disabled={busy || facilities.loading} onChange={e => setFacility(e.target.value)}><option value="">Choose a facility</option>{facilities.data?.map(f => <option key={f.facility_id} value={f.facility_id}>{f.facility_name} — {f.location}</option>)}</select></label>
         <label className="field">Start<input type="datetime-local" required value={start} disabled={busy} onChange={e => setStart(e.target.value)} /></label>
@@ -59,5 +64,6 @@ export default function CreateGame() {
         <div className="form-row"><button className="button button-primary" disabled={busy || !league || !home || !away || !facility || !start || !end}>{busy ? 'Scheduling…' : 'Schedule game'}</button><Link className="button button-outline" to="/schedule">Cancel</Link></div>
       </form>
     </section>
-  </main>
+  </>
+  return embedded ? <div className="admin-create-game">{content}</div> : <main className="content-page detail-page">{content}</main>
 }

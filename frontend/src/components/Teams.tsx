@@ -4,6 +4,9 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { api, formatDate, query, useApi, type Invite, type League, type MyTeam, type TeamSummary } from '../api'
 import { useAuth } from '../auth'
 import TeamTable from './TeamTable'
+import Pagination from './Pagination'
+import { paginate } from '../pagination'
+import ViewTabs from './ViewTabs'
 
 // The signed-in player's pending invites. Hidden when there are none.
 function Invitations({ onAnswered }: { onAnswered: (message: string) => void }) {
@@ -89,37 +92,55 @@ function Teams() {
   const [membershipVersion, setMembershipVersion] = useState(0)
   const notice = answered || routeNotice
   const leagueId = params.get('league_id') ?? ''
+  const hasPersonalTeams = user?.role === 'player'
+  const selectedView = params.get('view')
+  const showPersonal = hasPersonalTeams && (selectedView === 'mine' || (selectedView !== 'all' && !params.has('league_id') && !params.has('page')))
 
   const leagues = useApi<League[]>('/api/leagues')
   const teams = useApi<TeamSummary[]>(`/api/teams${query({ league_id: leagueId })}`)
+  const teamPage = paginate(teams.data ?? [], params.get('page'))
+
+  function setPage(page: number) {
+    const next = new URLSearchParams(params)
+    if (page === 1) next.delete('page')
+    else next.set('page', String(page))
+    setParams(next)
+  }
+
+  function setView(view: 'mine' | 'all') {
+    const next = new URLSearchParams(params)
+    next.set('view', view)
+    setParams(next)
+  }
 
   return (
     <main className="content-page teams-page">
       <div className="page-intro">
-        <p className="eyebrow">Team directory</p>
         <div className="intro-row">
           <div><h1>Meet the teams.</h1><p>Open a team to see its roster. Captains can rename their team, invite players by PID and manage the roster.</p></div>
           {canRegister && <Link className="button button-primary" to={`/teams/new${query({ league: leagueId })}`}>Register a team</Link>}
         </div>
       </div>
 
-      {user?.role === 'player' && <>
+      {hasPersonalTeams && <>
         <Invitations key={user.user_id} onAnswered={message => { setAnswered(message); setMembershipVersion(version => version + 1); teams.reload() }} />
-        <YourTeams key={`${user.user_id}-${membershipVersion}`} />
+        <ViewTabs label="Team views" personalLabel="Your teams" allLabel="All teams" value={showPersonal ? 'mine' : 'all'} onChange={setView} />
       </>}
+      {notice && <p className="notice notice-success" role="status">{notice}</p>}
+      {showPersonal && user && <YourTeams key={`${user.user_id}-${membershipVersion}`} />}
 
+      {!showPersonal && <>
       <h2>All teams</h2>
 
       <form className="filters" role="search" onSubmit={e => e.preventDefault()}>
         <label className="field">League
-          <select value={leagueId} onChange={e => setParams(e.target.value ? { league_id: e.target.value } : {}, { replace: true })}>
+          <select value={leagueId} onChange={e => setParams({ ...(e.target.value ? { league_id: e.target.value } : {}), ...(hasPersonalTeams ? { view: 'all' } : {}) }, { replace: true })}>
             <option value="">All leagues</option>
             {leagues.data?.map(l => <option key={l.league_id} value={l.league_id}>{l.league_name}</option>)}
           </select>
         </label>
       </form>
 
-      {notice && <p className="notice notice-success" role="status">{notice}</p>}
       {teams.error && <p className="notice notice-error" role="alert">{teams.error}</p>}
       {teams.loading && !teams.data && <p className="loading">Loading teams…</p>}
       {teams.data && teams.data.length === 0 && (
@@ -130,10 +151,12 @@ function Teams() {
       )}
       {teams.data && teams.data.length > 0 && (
         <>
-          <p className="result-count">{teams.data.length} team{teams.data.length === 1 ? '' : 's'}</p>
-          <TeamTable teams={teams.data} />
+          <p className="result-count">Showing {teamPage.start + 1}–{teamPage.end} of {teams.data.length} team{teams.data.length === 1 ? '' : 's'}</p>
+          <TeamTable teams={teamPage.items} />
+          <Pagination page={teamPage.page} pageCount={teamPage.pageCount} onPageChange={setPage} />
         </>
       )}
+      </>}
     </main>
   )
 }

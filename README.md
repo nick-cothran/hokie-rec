@@ -15,14 +15,18 @@
 
    ```powershell
    python migrate.py
-   python seed_demo_accounts.py --development
+   python -m seeds.seed_demo_accounts --development
    ```
 
-   `migrate.py` brings an existing database up to date (authentication tables, roster rules, and the Phase III schema in `db/phase3.sql`) without losing data; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. The administrators are `simvt0133`–`simvt0135`; sign in as one and open **Admin** to create officials and other administrators. Anyone can change their password from **Account**. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
+   `migrate.py` brings an existing database up to date, including membership history and scheduling rules; it is safe to rerun. On a pre-Phase III database it moves roster limits into `Sport` and drops the derived columns `League.league_name`, `Game.game_type` and `ScoreReport.is_forfeit`, and stops without changes if any of them disagrees with the data that replaces it. Existing roster rows provide at most their most recent membership period; older overwritten periods cannot be recovered. All 135 seeded users (`simvt0001`–`simvt0135`) use password `hokie`. The administrators are `simvt0133`–`simvt0135`; sign in as one and open **Admin** to create officials and other administrators. Anyone can change their password from **Account**. Add `--reset` to the account-seeding command to replace existing demo passwords; sign-up accounts are unaffected.
 
    **Profile:** Open **Account** to edit your first name, last name, email, and optional phone number. Saved names appear immediately in the header and on rosters. PID and role are read-only; password changes remain available on the profile page. No additional migration or seeding is needed.
 
-   **Schedule a game:** Sign in as an administrator and open **Schedule → Schedule a game**. Choose two active teams in the same league, a facility, and future start/end times in your device's time zone. The application checks for overlapping team and facility bookings. This creates one regular-season game; assigning officials is a separate step.
+   **Schedule a game:** Sign in as an administrator and open **Schedule → Schedule a game**. Choose two active teams in the same league, a facility, and future start/end times in Blacksburg (Eastern) time. Regular-season games must fit within the league's season dates. The application checks for overlapping team and facility bookings and warns about undersized rosters. The Schedule page also offers round-robin generation, game management, and official assignments. Once a playoff bracket exists, remove it before adding regular-season games. Individual playoff games cannot be rescheduled; manage the bracket from its league page.
+
+   **Upcoming demo game:** To add an upcoming game for player `simvt0001` and official `simvt0121` without replacing existing games or results, run `python -m seeds.seed_score_demo --development --upcoming` from `/backend`. Rerunning it reuses an existing upcoming demo assignment when available.
+
+   **Results and playoffs:** A replacement official can be assigned to a completed game for a correction. If a regular-season correction would change an existing bracket's seeds, remove the unplayed bracket first, then make the correction and regenerate it. A bracket with playoff results cannot be removed. If advancing a winner would overlap another game for that team, an administrator must reschedule the conflicting game before the official can submit the result.
 
 3. From `/backend` (venv active), run `uvicorn main:app --reload`. The terminal prints the DB connection on startup.
 4. Open http://localhost:8000/docs to try every endpoint in the browser.
@@ -57,7 +61,7 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | POST | `/api/admin/users` | `{vt_pid, first_name, last_name, email, phone, role, password}` | admin | Creates a `player`, `official` or `admin` with an initial password (same rules as sign-up). The admin stays signed in. 409 duplicate PID/email. 201 → user |
 | GET | `/api/admin/facilities` | | admin | Facilities available for scheduling |
 | GET | `/api/admin/officials` | | admin | Active officials (`user_id`, name, `vt_pid`) to choose from when assigning |
-| POST | `/api/admin/assignments` | `{game_id, official_id, position?}` | admin | Assigns an active official to a future scheduled game; `position` defaults to `referee`. 404 unknown game; 409 if the game isn't upcoming, the user isn't an active official, or they're already assigned. 201 → assignment |
+| POST | `/api/admin/assignments` | `{game_id, official_id, position?}` | admin | Assigns an active official to a scheduled game, including one already started, or a completed game for a correction; `position` defaults to `referee`. Rejects duplicates and overlapping scheduled assignments. 201 → assignment |
 | GET | `/api/admin/players` | `?q=` (optional) | admin | Up to 100 players whose PID or name matches, with `is_active` and a current `suspended_until` (past suspensions show as null) |
 | PATCH | `/api/admin/players/{player_id}/suspension` | `{suspended_until}` | admin | Suspends a player through a campus date (today or later), or `null` to lift it. A suspended player can't register or join teams. 404 if not a player; 422 past date. 204 |
 | POST | `/api/admin/games` | `{league_id, facility_id, home_team_id, away_team_id, start_time, end_time}` | admin | Creates a regular-season game; times must include a time zone. 409 if a team or facility overlaps another game. 201 → `{game_id}` |
@@ -67,6 +71,8 @@ Sign in first: the browser keeps a session cookie, and every write also needs th
 | GET | `/api/leagues` | `?sport=Soccer&term=Fall 2026` (both optional) | anyone | S1. Leagues with `team_count` |
 | GET | `/api/teams` | `?league_id=1` (optional) | anyone | Team directory with league, captain and `member_count` |
 | GET | `/api/me/teams` | | signed in | Teams where the current user is an active roster member, including whether they are captain |
+| GET | `/api/me/membership-history` | | signed in | Membership periods, including teams the player left and deleted teams |
+| GET | `/api/teams/{team_id}/eligibility` | | captain or admin | Private suspension flags for active roster members |
 | POST | `/api/teams` | `{league_id, team_name}` | active player | S2. You become captain. 409 outside the registration window or if you're already on a team in that league. 201 → `{team_id}` |
 | GET | `/api/teams/{team_id}` | | anyone | Team, league roster limits (`min_roster_size`, `max_roster_size`, `roster_lock_date`, `roster_locked`) and `roster` |
 | PATCH | `/api/teams/{team_id}` | `{team_name}` | captain | S3. 200 → `{team_id, team_name}` |

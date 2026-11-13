@@ -3,7 +3,7 @@
 import argparse
 from getpass import getpass
 
-from auth import password_hasher, token_hash
+from routers.auth import password_hasher, token_hash
 from database import db
 
 # Exact identifiers from db/seed.sql; never provision arbitrary registered users.

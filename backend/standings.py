@@ -32,3 +32,11 @@ def league_standings(conn, league_id: int) -> list[dict]:
         GROUP BY t.team_id
         ORDER BY wins DESC, point_diff DESC, t.team_name
     """, {"league_id": league_id}).fetchall()
+
+
+def bracket_seed_order(conn, league_id: int) -> list[int] | None:
+    """The currently ranked qualifying teams, or None if there is no bracket."""
+    count = conn.execute("SELECT COUNT(*) AS n FROM Game WHERE league_id = %s AND playoff_round = 1", (league_id,)).fetchone()['n']
+    if not count:
+        return None
+    return [team['team_id'] for team in league_standings(conn, league_id) if team['team_status'] == 'active'][:2 * count]

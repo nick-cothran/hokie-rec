@@ -42,9 +42,8 @@ function SignUp() {
   }
 
   return (
-    <main className="signin-page">
+    <main className="signin-page signup-page">
       <section className="signin-panel">
-        <p className="eyebrow">Hokie Rec account</p>
         <h1>{user ? 'You’re signed in.' : 'Join the team.'}</h1>
         {loading ? <p role="status">Checking your session…</p> : user ? (
           <div className="signin-form">
@@ -80,7 +79,6 @@ function SignUp() {
         {(error || sessionError) && <p className="notice notice-error" role="alert">{error || sessionError}</p>}
         <p className="signin-help">Just looking around? <Link to="/leagues">Browse leagues</Link>.</p>
       </section>
-      <aside className="signin-aside"><p className="eyebrow">Hokie Rec</p><h2>Find your people.</h2><p>Start your season with a player account. Explore leagues, register a team, and bring your friends along.</p><Link className="text-link" to="/leagues">Explore leagues <span aria-hidden="true">→</span></Link></aside>
     </main>
   )
 }

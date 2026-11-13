@@ -1,0 +1,6 @@
+.report-heading { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem 2rem; margin-bottom: 1.25rem; }
+.report-heading > div { flex: 1 1 320px; }
+.report-heading h2 { margin: 0; }
+.report-heading p { margin: 0.5rem 0 0; color: var(--ink-soft); }
+.report-filter { flex: 0 1 320px; min-width: 0; }
+.report-filter .field select { min-width: 0; }

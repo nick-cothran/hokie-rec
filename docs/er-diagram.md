@@ -1,6 +1,6 @@
 # Hokie Rec ER diagram (Phase III)
 
-Built from `db/schema.sql`, `db/auth.sql` and `db/phase3.sql`. GitHub renders the diagram below.
+Built from `db/schema.sql`, `db/auth.sql`, `db/phase3.sql` and `db/final_features.sql`.
 
 ```mermaid
 erDiagram
@@ -10,6 +10,9 @@ erDiagram
     Users ||--o{ Team : "captains"
     Team ||--o{ RosterMembership : "has"
     Users ||--o{ RosterMembership : "joins"
+    Users ||--o{ MembershipPeriod : "has history"
+    RosterMembership |o--o{ MembershipPeriod : "records periods"
+    Team |o--o{ MembershipPeriod : "appears in history"
     Facility ||--o{ Game : "hosts"
     Team |o--o{ Game : "plays home"
     Team |o--o{ Game : "plays away"
@@ -79,6 +82,18 @@ erDiagram
         timestamptz left_at "optional"
     }
 
+    MembershipPeriod {
+        int period_id PK
+        int membership_id FK "optional after membership deletion"
+        int team_id FK "optional after team deletion"
+        int user_id FK
+        varchar team_name "snapshot"
+        text league_name "snapshot"
+        timestamptz joined_at
+        timestamptz left_at "optional"
+        varchar end_reason "left, removed or team_deleted"
+    }
+
     Facility {
         int facility_id PK
         varchar facility_name UK
@@ -88,7 +103,7 @@ erDiagram
     Game {
         int game_id PK
         int league_id FK
-        int facility_id FK "UK with start_time"
+        int facility_id FK "unique with start_time for non-cancelled games"
         int home_team_id FK "Team; empty until a playoff slot is decided"
         int away_team_id FK "Team; differs from home"
         int next_game_id FK "Game the winner plays next"
@@ -152,7 +167,9 @@ erDiagram
 
 - **Views.** `LeagueView` is a league with its sport's name and roster limits, plus a display name built from the league's columns (e.g. "Coed Soccer, Recreational, Fall 2026"). `LatestScoreReport` is each game's newest score report, the one that counts.
 - **Score reports** are never edited; a correction is a new report. Each report holds a result: a forfeit, or both scores.
-- **Playoff games:** a game is a playoff game when `playoff_round` is set. Its winner fills a team slot of `next_game_id`.
+- **Playoff games:** a game is a playoff game when `playoff_round` is set. Its winner fills a team slot of `next_game_id`. Individual playoff games cannot be rescheduled because feeder order uses start times.
+- **Facility slots:** non-cancelled games must have a unique facility and start time; cancelled games leave the slot available.
+- **Membership history:** each join creates a period; leave, removal, or team deletion closes it. Migration can recover only the last period still present in each old roster row.
 - **Rosters:** a player is active on at most one team per league, and a team's captain is always an active member of it.
 - **Game teams** play in the game's league.
-- **Deleting:** deleting a team removes its roster rows. Deleting a game removes its score reports and assignments, but is blocked while it has incident reports. Deleting a user removes their credentials and sessions.
+- **Deleting:** deleting a team removes its roster rows but retains membership periods with team and league name snapshots. Deleting a game removes its score reports and assignments, but is blocked while it has incident reports. Deleting a user removes their credentials, sessions, and membership history.

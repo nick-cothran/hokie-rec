@@ -78,7 +78,7 @@ function InviteForm({ team, onSaved }: { team: Team; onSaved: (message: string) 
 }
 
 // The captain hands captaincy to another active member
-function HandOffForm({ team, onSaved }: { team: Team; onSaved: (message: string) => void }) {
+function HandOffForm({ team, onSaved, admin = false }: { team: Team; onSaved: (message: string) => void; admin?: boolean }) {
   const members = team.roster.filter(m => m.status === 'active' && m.user_id !== team.captain_id)
   const [userId, setUserId] = useState('')
   const [error, setError] = useState('')
@@ -86,17 +86,17 @@ function HandOffForm({ team, onSaved }: { team: Team; onSaved: (message: string)
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const member = members.find(m => m.user_id === Number(userId))
-    if (!member || !window.confirm(`Make ${fullName(member)} the captain of ${team.team_name}?\n\nYou'll stay on the roster as a regular member.`)) return
+    if (!member || !window.confirm(`Make ${fullName(member)} the captain of ${team.team_name}?${admin ? '' : "\n\nYou'll stay on the roster as a regular member."}`)) return
     setError('')
     try {
-      await api(`/api/teams/${team.team_id}/captain`, { method: 'PUT', body: JSON.stringify({ user_id: member.user_id }) })
+      await api(`${admin ? '/api/admin' : '/api'}/teams/${team.team_id}/captain`, { method: 'PUT', body: JSON.stringify({ user_id: member.user_id }) })
       onSaved(`${fullName(member)} is now the captain.`)
     } catch (e) {
       setError((e as Error).message)
     }
   }
 
-  if (members.length === 0) return <p>Hand off captaincy: no other active members yet.</p>
+  if (members.length === 0) return null
   return (
     <form className="form-stack" onSubmit={handleSubmit}>
       <div className="form-row">
@@ -122,6 +122,7 @@ function TeamDetail() {
   const valid = Number.isInteger(id) && id > 0
 
   const { data: team, error, loading, reload } = useApi<Team>(valid ? `/api/teams/${id}` : null)
+  const eligibility = useApi<{ user_id: number; suspended: boolean }[]>(team && (user?.role === 'admin' || team.captain_id === user?.user_id) ? `/api/teams/${id}/eligibility` : null)
   const [notice, setNotice] = useState<string>(location.state?.notice ?? '')
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)  // one roster action at a time, so a double click can't send two
@@ -129,9 +130,8 @@ function TeamDetail() {
   if (!valid || error === 'Team not found.') {
     return (
       <main className="content-page detail-page team-detail-page">
-        <Link className="back-link" to="/teams">← Team directory</Link>
+        <nav className="detail-breadcrumb" aria-label="Team navigation"><Link className="detail-back" to="/teams"><span aria-hidden="true">←</span> All teams</Link></nav>
         <section className="empty-state">
-          <p className="eyebrow">Team details</p>
           <h1>Team not found</h1>
           <p>There's no team with id “{teamId}”.</p>
           <Link className="button button-primary" to="/teams">Back to teams</Link>
@@ -196,18 +196,24 @@ function TeamDetail() {
 
   return (
     <main className="content-page detail-page team-detail-page">
-      <Link className="back-link" to={team ? `/teams?league_id=${team.league_id}` : '/teams'}>← Team directory</Link>
+      {!team && <nav className="detail-breadcrumb" aria-label="Team navigation">
+        <Link className="detail-back" to="/teams"><span aria-hidden="true">←</span> Teams</Link>
+      </nav>}
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {loading && !team && <p className="loading">Loading team…</p>}
       {team && (
         <div className="stack">
           <div className="page-intro">
-            <p className="eyebrow"><Link className="text-link" to={`/leagues/${team.league_id}`}>{team.league_name}</Link></p>
+            <div className="detail-top-actions">
+              <Link className="detail-back" to={`/teams?league_id=${team.league_id}`}><span aria-hidden="true">←</span> All teams</Link>
+              <nav className="detail-actions" aria-label="Team links"><Link to={`/schedule?league=${team.league_id}&team=${team.team_id}`}>Schedule <span aria-hidden="true">→</span></Link><Link to={`/reports?league=${team.league_id}`}>Standings <span aria-hidden="true">→</span></Link></nav>
+            </div>
             <h1>{team.team_name}</h1>
             <ul className="meta-list">
-              <li>Captain <strong>{captain ? fullName(captain) : `User #${team.captain_id}`}</strong></li>
-              <li>Status <strong>{team.status}</strong></li>
-              <li>Roster <strong>{activeCount} / {team.max_roster_size}</strong> (min {team.min_roster_size})</li>
+              <li>League: <Link className="text-link" to={`/leagues/${team.league_id}`}>{team.league_name}</Link></li>
+              <li>Captain: <strong>{captain ? fullName(captain) : `User #${team.captain_id}`}</strong></li>
+              <li>Status: <strong>{team.status}</strong></li>
+              <li>Roster: <strong>{activeCount} / {team.max_roster_size}</strong> (min {team.min_roster_size})</li>
               <li>{team.roster_locked ? <strong>Roster locked</strong> : <>Roster locks <strong>{formatDate(team.roster_lock_date)}</strong></>}</li>
             </ul>
           </div>
@@ -228,32 +234,9 @@ function TeamDetail() {
             </section>
           )}
 
-          <section className="panel">
-            <h2>Manage team</h2>
-            {isCaptain ? (
-              <div className="stack">
-                <RenameForm key={team.team_name} team={team} onSaved={saved} />
-                {team.roster_locked && <p className="notice notice-info">The roster locked on {formatDate(team.roster_lock_date)}. You can still rename the team, withdraw invites and hand off captaincy.</p>}
-                <InviteForm team={team} onSaved={saved} />
-                <HandOffForm key={team.captain_id} team={team} onSaved={saved} />
-              </div>
-            ) : (
-              <>
-                <p>Only the captain{captain ? `, ${fullName(captain)},` : ''} can rename this team or manage its roster.{user ? ` You're signed in as ${fullName(user)}.` : ''}</p>
-                {!user && <Link className="button button-outline" to={`/sign-in?next=/teams/${team.team_id}`}>Sign in</Link>}
-                {mine?.status === 'active' && (
-                  <button className="button button-danger" type="button" disabled={busy || team.roster_locked}
-                    onClick={() => run(`/api/teams/${team.team_id}/leave`, 'POST', `You left ${team.team_name}.`,
-                      `Leave ${team.team_name}?\n\nThe captain can invite you back before the roster locks.`)}>
-                    {team.roster_locked ? 'Roster locked' : 'Leave team'}
-                  </button>
-                )}
-              </>
-            )}
-          </section>
-
           <section>
             <div className="section-heading"><h2>Roster</h2></div>
+            {eligibility.error && <p className="notice notice-error" role="alert">Could not load private eligibility information: {eligibility.error}</p>}
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
@@ -266,7 +249,7 @@ function TeamDetail() {
                         {fullName(m)}
                         {m.user_id === team.captain_id && <> <span className="pill pill-captain">Captain</span></>}
                       </td>
-                      <td><span className={`pill pill-${m.status}`}>{m.status === 'invited' ? 'Invite pending' : m.status}</span></td>
+                      <td><span className={`pill pill-${m.status}`}>{m.status === 'invited' ? 'Invite pending' : m.status}</span>{eligibility.data?.some(item => item.user_id === m.user_id && item.suspended) && <> · Suspended — not eligible to play</>}</td>
                       {isCaptain && (
                         <td className="num">
                           {m.status === 'invited' && (
@@ -283,6 +266,29 @@ function TeamDetail() {
               </table>
             </div>
           </section>
+
+          {user?.role === 'admin' && team.roster.some(member => member.status === 'active' && member.user_id !== team.captain_id) && <section className="panel"><h2>Reassign captain</h2><HandOffForm key={team.captain_id} team={team} onSaved={saved} admin /></section>}
+
+          {isCaptain && <section className="panel">
+            <h2>Manage team</h2>
+            <div className="stack">
+              {team.roster_locked && <p className="notice notice-info">The roster locked on {formatDate(team.roster_lock_date)}. You can still rename the team, withdraw invites and hand off captaincy.</p>}
+              <RenameForm key={team.team_name} team={team} onSaved={saved} />
+              <InviteForm team={team} onSaved={saved} />
+              <HandOffForm key={team.captain_id} team={team} onSaved={saved} />
+            </div>
+          </section>}
+
+          {!isCaptain && mine?.status === 'active' && (
+            <section className="panel">
+              <h2>Your membership</h2>
+              <button className="button button-danger" type="button" disabled={busy || team.roster_locked}
+                onClick={() => run(`/api/teams/${team.team_id}/leave`, 'POST', `You left ${team.team_name}.`,
+                  `Leave ${team.team_name}?\n\nThe captain can invite you back before the roster locks.`)}>
+                {team.roster_locked ? 'Roster locked' : 'Leave team'}
+              </button>
+            </section>
+          )}
 
           {isCaptain && (
             <section className="panel danger-zone">

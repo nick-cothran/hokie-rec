@@ -1,6 +1,6 @@
 import '../styles/LeagueDetail.css'
 import { Link, useParams } from 'react-router-dom'
-import { query, useApi, type League, type TeamSummary } from '../api'
+import { formatCampusDate, query, useApi, type League, type TeamSummary } from '../api'
 import TeamTable from './TeamTable'
 import Playoffs from './Playoffs'
 import { useAuth } from '../auth'
@@ -20,9 +20,8 @@ function LeagueDetail() {
   if (!valid || (leagues.data && !league)) {
     return (
       <main className="content-page detail-page league-detail-page">
-        <Link className="back-link" to="/leagues">← All leagues</Link>
+        <nav className="detail-breadcrumb" aria-label="League navigation"><Link className="detail-back" to="/leagues"><span aria-hidden="true">←</span> All leagues</Link></nav>
         <section className="empty-state">
-          <p className="eyebrow">League details</p>
           <h1>League not found</h1>
           <p>There's no league with id “{leagueId}”.</p>
           <Link className="button button-primary" to="/leagues">Back to leagues</Link>
@@ -33,20 +32,25 @@ function LeagueDetail() {
 
   return (
     <main className="content-page detail-page league-detail-page">
-      <Link className="back-link" to="/leagues">← All leagues</Link>
+      {!league && <nav className="detail-breadcrumb" aria-label="League navigation"><Link className="detail-back" to="/leagues"><span aria-hidden="true">←</span> All leagues</Link></nav>}
       {leagues.error && <p className="notice notice-error" role="alert">{leagues.error}</p>}
       {!league && !leagues.error && <p className="loading">Loading league…</p>}
       {league && (
         <div className="stack">
           <div className="page-intro">
+            <div className="detail-top-actions">
+              <Link className="detail-back" to="/leagues"><span aria-hidden="true">←</span> All leagues</Link>
+              <nav className="detail-actions" aria-label="League links"><Link to={`/schedule?league=${id}`}>Schedule <span aria-hidden="true">→</span></Link><Link to={`/reports?league=${id}`}>Standings <span aria-hidden="true">→</span></Link></nav>
+            </div>
             <p className="eyebrow">{league.term}</p>
             <div className="intro-row">
               <div>
                 <h1>{league.league_name}</h1>
                 <ul className="meta-list">
-                  <li>Sport <strong>{league.sport_name}</strong></li>
-                  <li>Category <strong>{league.category}</strong></li>
-                  <li>Level <strong>{league.skill_level}</strong></li>
+                  <li>Sport: <strong>{league.sport_name}</strong></li>
+                  <li>Category: <strong>{league.category}</strong></li>
+                  <li>Level: <strong>{league.skill_level}</strong></li>
+                  <li>Registration: <strong>{league.registration_status === 'upcoming' ? `Opens ${formatCampusDate(league.reg_open_at)}` : league.registration_status === 'open' ? 'Open' : 'Closed'}</strong></li>
                 </ul>
               </div>
               {canRegister && registrationOpen && <Link className="button button-primary" to={`/teams/new${query({ league: id })}`}>Register a team</Link>}

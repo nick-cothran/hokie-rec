@@ -39,7 +39,6 @@ function RegisterTeam() {
     <main className="content-page detail-page">
       <Link className="back-link" to="/teams">← Team directory</Link>
       <div className="page-intro">
-        <p className="eyebrow">New team</p>
         <h1>Register a team.</h1>
         <p>Pick a league and a name. You'll be the captain and the first player on the roster.</p>
       </div>

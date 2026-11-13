@@ -43,33 +43,33 @@ function ResultForm({ game, correcting, onSaved }: { game: Game; correcting: boo
   }
 
   return (
-    <form className="form-stack" onSubmit={submit}>
+    <form className="form-stack score-entry-form" onSubmit={submit}>
       <fieldset className="result-mode" disabled={busy}>
         <legend>Result type</legend>
         <label><input type="radio" name="mode" checked={mode === 'score'} onChange={() => setMode('score')} /> Final score</label>
         <label><input type="radio" name="mode" checked={mode === 'forfeit'} onChange={() => setMode('forfeit')} /> Forfeit</label>
       </fieldset>
-      {mode === 'score' ? (
-        <div className="score-inputs">
-          <label className="field">{game.home_team_name} <small>Home</small>
-            <input type="number" inputMode="numeric" min={0} max={999} step={1} value={home} onChange={e => setHome(e.target.value)} required disabled={busy} />
-          </label>
-          <label className="field">{game.away_team_name} <small>Away</small>
-            <input type="number" inputMode="numeric" min={0} max={999} step={1} value={away} onChange={e => setAway(e.target.value)} required disabled={busy} />
-          </label>
-        </div>
-      ) : (
-        <label className="field">Forfeiting team
-          <select value={forfeitTeam} onChange={e => setForfeitTeam(e.target.value)} required disabled={busy}>
-            <option value="">Choose the team that forfeited</option>
-            <option value={game.home_team_id ?? ''}>{game.home_team_name}</option>
-            <option value={game.away_team_id ?? ''}>{game.away_team_name}</option>
-          </select>
-          <small>A forfeit counts as a loss for that team.</small>
-        </label>
-      )}
       {error && <p className="notice notice-error" role="alert">{error}</p>}
-      <div className="form-row">
+      <div className="score-submission-row">
+        {mode === 'score' ? (
+          <div className="score-inputs">
+            <label className="field">{game.home_team_name} <small>Home</small>
+              <input type="number" inputMode="numeric" min={0} max={999} step={1} value={home} onChange={e => setHome(e.target.value)} required disabled={busy} />
+            </label>
+            <label className="field">{game.away_team_name} <small>Away</small>
+              <input type="number" inputMode="numeric" min={0} max={999} step={1} value={away} onChange={e => setAway(e.target.value)} required disabled={busy} />
+            </label>
+          </div>
+        ) : (
+          <label className="field">Forfeiting team
+            <select value={forfeitTeam} onChange={e => setForfeitTeam(e.target.value)} required disabled={busy}>
+              <option value="">Choose the team that forfeited</option>
+              <option value={game.home_team_id ?? ''}>{game.home_team_name}</option>
+              <option value={game.away_team_id ?? ''}>{game.away_team_name}</option>
+            </select>
+            <small>A forfeit counts as a loss for that team.</small>
+          </label>
+        )}
         <button className="button button-primary" type="submit" disabled={busy}>
           {busy ? 'Submitting…' : correcting ? 'Submit correction' : 'Submit result'}
         </button>
@@ -94,7 +94,6 @@ function ScoreEntry() {
     return (
       <main className="content-page">
         <section className="empty-state">
-          <p className="eyebrow">Game result</p>
           <h1>Sign in to enter results</h1>
           <p>Only the game's assigned officials and administrators can see score reports.</p>
           <Link className="button button-primary" to={`/sign-in?next=${encodeURIComponent(`/games/${id}/score`)}`}>Sign in</Link>
@@ -108,7 +107,9 @@ function ScoreEntry() {
 
   return (
     <main className="content-page detail-page score-entry-page">
-      <Link className="back-link" to={game ? `/schedule?league=${game.league_id}` : '/schedule'}>← Schedule</Link>
+      <div className="detail-top-actions score-entry-actions">
+        <Link className="detail-back" to={game ? `/schedule?league=${game.league_id}` : '/schedule'}><span aria-hidden="true">←</span> Schedule</Link>
+      </div>
       {sheet.error && (
         <section className="empty-state" role="alert">
           <h1>{sheet.error === 'Game not found.' ? 'Game not found' : 'Result unavailable'}</h1>
@@ -117,26 +118,31 @@ function ScoreEntry() {
       )}
       {sheet.loading && !sheet.data && <p className="loading">Loading game…</p>}
       {game && sheet.data && (
-        <div className="stack">
+        <div className="score-entry-layout">
           <div className="page-intro">
-            <p className="eyebrow"><Link className="text-link" to={`/leagues/${game.league_id}`}>{game.league_name}</Link></p>
             <h1>{game.home_team_name ?? 'TBD'} vs {game.away_team_name ?? 'TBD'}</h1>
             <ul className="meta-list">
-              <li>When <strong>{formatGameTime(game.start_time)}</strong></li>
-              <li>Where <strong>{game.facility_name}</strong></li>
-              <li>Status <strong>{game.status}</strong></li>
+              <li>League: <strong><Link className="text-link" to={`/leagues/${game.league_id}`}>{game.league_name}</Link></strong></li>
+              <li>When: <strong>{formatGameTime(game.start_time)}</strong></li>
+              <li>Where: <strong>{game.facility_name}</strong></li>
+              <li>Status: <strong>{game.status}</strong></li>
             </ul>
           </div>
 
           {notice && <p className="notice notice-success" role="status">{notice}</p>}
 
-          <section className="panel" aria-labelledby="current-result-heading">
-            <h2 id="current-result-heading">Official result</h2>
-            <p className="current-result">{current ? describe(current, game) : 'No result submitted yet.'}</p>
-          </section>
-
-          <section className="panel" aria-labelledby="enter-result-heading">
-            <h2 id="enter-result-heading">{current ? 'Correct the result' : 'Enter the result'}</h2>
+          {current && <section className="panel score-result-card" aria-labelledby="current-result-heading">
+            <div className="score-result-heading">
+              <div><p className="eyebrow">Latest submission</p><h2 id="current-result-heading">Official result</h2></div>
+              <span className="pill pill-active">Current</span>
+            </div>
+            <p className="current-result">{describe(current, game)}</p>
+          </section>}
+          <section className="panel score-form-card" aria-labelledby="enter-result-heading">
+            <div className="score-result-heading">
+              <h2 id="enter-result-heading">{current ? 'Correct the result' : 'Enter the result'}</h2>
+            </div>
+            {game.playoff_round === null && game.bracket_exists && sheet.data.can_submit && <p className="notice notice-info">A playoff bracket already exists. A result that changes its seeds requires the unplayed bracket to be removed first.</p>}
             {game.playoff_round !== null && sheet.data.can_submit && (
               <p className="result-count">Playoff game: enter the score after any tiebreaker. {game.next_game_id !== null && 'The winner moves on to the next round.'}</p>
             )}
@@ -146,7 +152,7 @@ function ScoreEntry() {
           </section>
 
           {sheet.data.reports.length > 0 && (
-            <section aria-labelledby="history-heading">
+            <section className="score-history" aria-labelledby="history-heading">
               <div className="section-heading"><h2 id="history-heading">Report history</h2></div>
               <div className="table-wrap">
                 <table className="data-table">
